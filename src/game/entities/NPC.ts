@@ -3,6 +3,7 @@ import { Entity, TilePos } from './Entity';
 import { Action } from '../ai/types';
 import { AgentLoop } from '../ai/AgentLoop';
 import type { EntityManager } from './EntityManager';
+import { log as logEvent } from '../ui/EventLog';
 
 export class NPC extends Entity {
     readonly id: string;
@@ -33,6 +34,21 @@ export class NPC extends Entity {
 
     initAgentLoop(entityManager: EntityManager) {
         this.agentLoop = new AgentLoop(this, entityManager);
+    }
+
+    pauseAI() { this.agentLoop?.pause(); }
+    resumeAI() { this.agentLoop?.resume(); }
+
+    restartAI(startTile: TilePos) {
+        this.agentLoop?.restart();
+        this.currentPlan = [];
+        this.recentEvents = [];
+        this.currentSkill = null;
+        this.isInConversation = false;
+        this.tilePos = { ...startTile };
+        const worldPos = this.map.tileToWorldXY(startTile.x, startTile.y)!;
+        this.sprite.setPosition(worldPos.x + 32, worldPos.y + 16);
+        this.updateDepth();
     }
 
     setPlan(actions: Action[]) {
@@ -113,5 +129,6 @@ export class NPC extends Entity {
         if (this.recentEvents.length > 20) {
             this.recentEvents.shift();
         }
+        logEvent(this.name, 'action', event);
     }
 }

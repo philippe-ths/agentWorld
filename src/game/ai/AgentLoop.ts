@@ -3,6 +3,7 @@ import type { EntityManager } from '../entities/EntityManager';
 import type { Observation, NearbyEntity, ReasoningResult } from './types';
 import * as AgentClient from './AgentClient';
 import { executeSkill, registerComposedSkill } from './SkillExecutor';
+import { log as logEvent } from '../ui/EventLog';
 
 const TICK_INTERVAL = 15000; // ms between medium-loop ticks
 
@@ -14,6 +15,7 @@ export class AgentLoop {
     private entityManager: EntityManager;
     private timeSinceLastTick: number;
     private pending = false;
+    private paused = false;
 
     constructor(npc: NPC, entityManager: EntityManager) {
         this.npc = npc;
@@ -30,7 +32,17 @@ export class AgentLoop {
         };
     }
 
+    pause() { this.paused = true; }
+    resume() { this.paused = false; }
+
+    restart() {
+        this.paused = false;
+        this.pending = false;
+        this.timeSinceLastTick = TICK_INTERVAL - (NPC_OFFSETS[this.npc.id] ?? 0);
+    }
+
     update(_time: number, delta: number) {
+        if (this.paused) return;
         if (this.npc.isInConversation) return;
         if (this.pending) return;
 
@@ -72,6 +84,7 @@ export class AgentLoop {
 
                 this.npc.currentSkill = result.skill;
                 this.npc.addEvent(`chose skill: ${result.skill}`);
+                logEvent(this.npc.name, 'action', `chose skill: ${result.skill}`);
 
                 if (result.escalate && result.skill === 'converse') {
                     this.npc.addEvent('wants to converse');
@@ -89,6 +102,7 @@ export class AgentLoop {
             }
         } catch (err) {
             console.error(`[AgentLoop] Error for ${this.npc.id}:`, err);
+            logEvent(this.npc.name, 'system', `tick error: ${err}`);
             this.npc.setPlan([{ type: 'wait', duration: 3000 }]);
         } finally {
             this.pending = false;

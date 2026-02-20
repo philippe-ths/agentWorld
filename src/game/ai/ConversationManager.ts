@@ -2,6 +2,7 @@ import type { NPC } from '../entities/NPC';
 import type { EntityManager } from '../entities/EntityManager';
 import * as AgentClient from './AgentClient';
 import type { Observation, NearbyEntity } from './types';
+import { log as logEvent } from '../ui/EventLog';
 
 interface Conversation {
     id: string;
@@ -94,11 +95,12 @@ export class ConversationManager {
 
             const text = result.dialogue ?? '...';
             conv.history.push({ speaker: speaker.name, text });
+            logEvent(speaker.name, 'conversation', `→ ${listener.name}: ${text}`);
 
             // Show speech bubble
             speaker.say(text, SPEECH_DURATION);
             speaker.addEvent(`said to ${listener.name}: "${text}"`);
-            listener.addEvent(`${speaker.name} said: "${text}"`);
+            listener.addEvent(`${speaker.name} said: "${text}"`); 
 
             // Wait for speech bubble to finish
             await this.delay(SPEECH_DURATION + PAUSE_BETWEEN);

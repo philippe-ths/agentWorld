@@ -6,6 +6,8 @@ import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
 import { ConversationManager } from '../ai/ConversationManager';
 import { ChatController } from '../ui/ChatController';
+import { ControlBar } from '../ui/ControlBar';
+import { LogPanel } from '../ui/LogPanel';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -30,6 +32,8 @@ export class GameScene extends Scene {
         this.spawnNPCs();
         new ConversationManager(this.entityManager);
         new ChatController(this, this.player, this.entityManager);
+        new ControlBar(this.entityManager);
+        new LogPanel();
         this.setupCamera();
     }
 

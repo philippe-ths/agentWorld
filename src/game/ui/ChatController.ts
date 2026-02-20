@@ -4,6 +4,7 @@ import type { NPC } from '../entities/NPC';
 import type { EntityManager } from '../entities/EntityManager';
 import * as AgentClient from '../ai/AgentClient';
 import type { NearbyEntity } from '../ai/types';
+import { log as logEvent } from './EventLog';
 
 const MAX_TURNS = 5;
 const SPEECH_DURATION = 4000;
@@ -122,6 +123,7 @@ export class ChatController {
         // Show player message
         this.player.say(text, SPEECH_DURATION);
         this.history.push({ speaker: 'Player', text });
+        logEvent('Player', 'conversation', `→ ${this.activeNpc.name}: ${text}`);
 
         // Build observation for the NPC
         const nearby: NearbyEntity[] = [{
@@ -152,7 +154,8 @@ export class ChatController {
             const reply = result.dialogue ?? '...';
             this.history.push({ speaker: this.activeNpc.name, text: reply });
             this.activeNpc.say(reply, SPEECH_DURATION);
-            this.activeNpc.addEvent(`said to Player: "${reply}"`);
+            logEvent(this.activeNpc.name, 'conversation', `→ Player: ${reply}`);
+            this.activeNpc.addEvent(`said to Player: "${reply}"`); 
         } catch {
             this.activeNpc.say('...', 2000);
         }

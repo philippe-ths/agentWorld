@@ -1,4 +1,4 @@
-import type { SkillSelection, ReasoningResult, Observation } from './types';
+import type { SkillSelection, ReasoningResult, Observation, Goal, GoalEvaluationResult } from './types';
 
 const BASE_URL = 'http://localhost:3001';
 
@@ -82,11 +82,26 @@ export function reportFailure(
     failureEvents: string[],
     skill?: string,
     stuckCount?: number,
+    goalDescription?: string,
+    goalContext?: string,
+    evaluationCriteria?: string,
+    outcome?: string,
+    resourceCost?: string,
 ): void {
     fetch(`${BASE_URL}/api/npc/failure`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, failureEvents, skill, stuckCount }),
+        body: JSON.stringify({
+            npcId,
+            failureEvents,
+            skill,
+            stuckCount,
+            goalDescription,
+            goalContext,
+            evaluationCriteria,
+            outcome,
+            resourceCost,
+        }),
     }).catch(() => {});
 }
 
@@ -96,4 +111,50 @@ export function reportSkillOutcome(skill: string, success: boolean): void {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ skill, success }),
     }).catch(() => {});
+}
+
+export function reportCommitment(
+    npcId: string,
+    from: string,
+    to: string,
+    goalId: string,
+    description: string,
+    status: 'agreed' | 'in_progress' | 'completed' | 'failed',
+): void {
+    fetch(`${BASE_URL}/api/npc/commitment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ npcId, from, to, goalId, description, status }),
+    }).catch(() => {});
+}
+
+export async function evaluateGoal(
+    npcId: string,
+    observation: Observation,
+    goal: Goal,
+): Promise<GoalEvaluationResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    try {
+        const res = await fetch(`${BASE_URL}/api/npc/goal/evaluate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ npcId, observation, goal }),
+            signal: controller.signal,
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as GoalEvaluationResult;
+    } catch (err) {
+        console.warn(`[AgentClient] evaluateGoal failed for ${npcId}:`, err);
+        return {
+            timestamp: Date.now(),
+            progressScore: 0.5,
+            summary: 'Goal evaluation unavailable; maintaining current strategy.',
+            shouldEscalate: false,
+        };
+    } finally {
+        clearTimeout(timeout);
+    }
 }

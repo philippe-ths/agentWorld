@@ -60,6 +60,7 @@ function makeObs(overrides: Partial<Observation> = {}): Observation {
         isInConversation: false,
         currentSkill: null,
         recentEvents: [],
+        activeGoals: [],
         ...overrides,
     };
 }

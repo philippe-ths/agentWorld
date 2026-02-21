@@ -2,13 +2,19 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { mediumLoopTick } from './ai/MediumLoop.js';
-import { generateDialogue, generateReasoning } from './ai/SlowLoop.js';
+import { generateDialogue, generateReasoning, evaluateGoalProgress } from './ai/SlowLoop.js';
 import { addObservation, initBuffer } from './memory/ShortTermBuffer.js';
 import { reflect, selfCritique } from './memory/Reflection.js';
 import { decayMemories, updateBeliefs } from './memory/LongTermMemory.js';
 import { upsertEntity, upsertRelation, loadGraph, addRule } from './memory/KnowledgeGraph.js';
 import { loadLearnedSkills, addSkill, recordOutcome } from './skills/SkillLibrary.js';
-import type { Observation, ReasoningRequest } from './types.js';
+import type { Observation, ReasoningRequest, GoalEvaluationRequest, CommitmentRequest } from './types.js';
+import {
+    initResourceLedger,
+    trackGoalUsage,
+    syncGoalComputeTotals,
+    getAggregateResourceStats,
+} from './goals/ResourceLedger.js';
 
 export const app = express();
 const PORT = 3001;
@@ -55,11 +61,30 @@ app.post('/api/npc/tick', async (req, res) => {
     const count = (tickCounts.get(observation.npcId) ?? 0) + 1;
     tickCounts.set(observation.npcId, count);
     if (count % 10 === 0) {
-        reflect(observation.npcId).catch(console.error);
+        const activeGoal = observation.activeGoals.find(g => g.status === 'active');
+        reflect(observation.npcId, {
+            activeGoals: observation.activeGoals
+                .filter(g => g.status === 'active')
+                .map(g => `${g.description} (p=${g.priority.toFixed(2)})`),
+            recentOutcomes: observation.activeGoals
+                .filter(g => g.status !== 'active')
+                .map(g => `${g.description}: ${g.status}`),
+            goalContext: activeGoal ? `${activeGoal.type}:${activeGoal.description.toLowerCase()}` : undefined,
+        }).catch(console.error);
         decayMemories(observation.npcId).catch(console.error);
     }
 
     const result = await mediumLoopTick(observation);
+
+    const activeGoal = observation.activeGoals.find(g => g.status === 'active');
+    if (activeGoal) {
+        trackGoalUsage(activeGoal.id, observation.npcId, result.llmUsage, 'haiku');
+        syncGoalComputeTotals(activeGoal.id, observation.npcId, {
+            embeddingCalls: activeGoal.resources.embeddingCalls,
+            pathfindingCalls: activeGoal.resources.pathfindingCalls,
+        });
+    }
+
     res.json(result);
 });
 
@@ -119,6 +144,11 @@ app.post('/api/npc/reason', async (req, res) => {
         );
     }
 
+    const activeGoal = request.observation.activeGoals.find(g => g.status === 'active');
+    if (activeGoal) {
+        trackGoalUsage(activeGoal.id, request.npcId, result.llmUsage, 'sonnet');
+    }
+
     res.json(result);
 });
 
@@ -127,14 +157,23 @@ app.post('/api/npc/reason', async (req, res) => {
 app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
 });
+
+app.get('/api/stats/resources', (_req, res) => {
+    res.json(getAggregateResourceStats());
+});
 // ── Failure reporting: triggers self-critique ────────────
 
 app.post('/api/npc/failure', async (req, res) => {
-    const { npcId, failureEvents, skill, stuckCount } = req.body as {
+    const { npcId, failureEvents, skill, stuckCount, goalDescription, goalContext, evaluationCriteria, outcome, resourceCost } = req.body as {
         npcId: string;
         failureEvents: string[];
         skill?: string;
         stuckCount?: number;
+        goalDescription?: string;
+        goalContext?: string;
+        evaluationCriteria?: string;
+        outcome?: string;
+        resourceCost?: string;
     };
 
     if (!npcId || !failureEvents?.length) {
@@ -143,7 +182,15 @@ app.post('/api/npc/failure', async (req, res) => {
     }
 
     // Fire self-critique asynchronously — don't block response
-    selfCritique(npcId, failureEvents, { skill, stuckCount }).catch(console.error);
+    selfCritique(npcId, failureEvents, {
+        skill,
+        stuckCount,
+        goalDescription,
+        goalContext,
+        evaluationCriteria,
+        outcome,
+        resourceCost,
+    }).catch(console.error);
 
     res.json({ status: 'accepted' });
 });
@@ -162,6 +209,40 @@ app.post('/api/npc/skill-outcome', async (req, res) => {
     }
 
     await recordOutcome(skill, success);
+    res.json({ status: 'recorded' });
+});
+
+// ── Goal evaluation (phase 2) ──────────────────────────
+
+app.post('/api/npc/goal/evaluate', async (req, res) => {
+    const request = req.body as GoalEvaluationRequest;
+
+    if (!request?.npcId || !request?.observation || !request?.goal) {
+        res.status(400).json({ error: 'Invalid goal evaluation request' });
+        return;
+    }
+
+    const result = await evaluateGoalProgress(request.npcId, request.observation, request.goal);
+    trackGoalUsage(request.goal.id, request.npcId, result.llmUsage, 'evaluation');
+    res.json(result);
+});
+
+app.post('/api/npc/commitment', async (req, res) => {
+    const request = req.body as CommitmentRequest;
+    if (!request?.npcId || !request?.from || !request?.to || !request?.goalId || !request?.description) {
+        res.status(400).json({ error: 'Invalid commitment request' });
+        return;
+    }
+
+    await upsertRelation(
+        request.npcId,
+        request.from,
+        request.to,
+        'committed_to',
+        request.status === 'failed' ? 0.4 : 0.9,
+        `${request.status}: ${request.goalId} :: ${request.description}`,
+    );
+
     res.json({ status: 'recorded' });
 });
 
@@ -212,6 +293,8 @@ async function start() {
     await Promise.all(NPC_IDS.map(id => initBuffer(id)));
     // Load any previously learned skills
     await loadLearnedSkills();
+    // Restore persisted resource usage ledger
+    await initResourceLedger();
 
     app.listen(PORT, () => {
         console.log(`[AgentWorld Server] Running on http://localhost:${PORT}`);

@@ -33,7 +33,7 @@ export class GameScene extends Scene {
         new ConversationManager(this.entityManager);
         new ChatController(this, this.player, this.entityManager);
         new ControlBar(this.entityManager);
-        new LogPanel();
+        new LogPanel(this.entityManager);
         this.setupCamera();
     }
 

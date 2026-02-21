@@ -141,6 +141,7 @@ export class ChatController {
             isInConversation: true,
             currentSkill: 'converse' as string | null,
             recentEvents: [...this.activeNpc.recentEvents],
+            activeGoals: this.activeNpc.activeGoals.map(g => ({ ...g })),
         };
 
         try {
@@ -150,6 +151,51 @@ export class ChatController {
                 this.history,
                 'Player',
             );
+
+            if (result.goalExtraction?.shouldCreateGoal && result.goalExtraction.goal) {
+                const now = Date.now();
+                const extracted = result.goalExtraction.goal;
+                const goal = {
+                    id: `goal_${this.activeNpc.id}_${now}`,
+                    npcId: this.activeNpc.id,
+                    type: extracted.type,
+                    description: extracted.description,
+                    source: {
+                        type: 'player_dialogue' as const,
+                        assignedBy: 'Player',
+                    },
+                    evaluation: extracted.evaluation,
+                    status: 'active' as const,
+                    priority: Math.max(0, Math.min(1, extracted.priority)),
+                    createdAt: now,
+                    expiresAt: null,
+                    resources: {
+                        totalTokensIn: 0,
+                        totalTokensOut: 0,
+                        estimatedCostUSD: 0,
+                        haikuCalls: 0,
+                        sonnetCalls: 0,
+                        embeddingCalls: 0,
+                        pathfindingCalls: 0,
+                        evaluationCalls: 0,
+                        wallClockMs: 0,
+                        apiLatencyMs: 0,
+                        mediumLoopTicks: 0,
+                    },
+                    parentGoalId: null,
+                    delegatedTo: null,
+                    delegatedFrom: null,
+                    estimatedDifficulty: extracted.estimatedDifficulty,
+                };
+
+                const outcome = this.activeNpc.addGoal(goal);
+                logEvent(this.activeNpc.name, 'system',
+                    outcome === 'ignored'
+                        ? `declined goal (low priority): ${goal.description}`
+                        : `accepted goal from Player: ${goal.description}`,
+                    { npcId: this.activeNpc.id },
+                );
+            }
 
             const reply = result.dialogue ?? '...';
             this.history.push({ speaker: this.activeNpc.name, text: reply });

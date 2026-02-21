@@ -1,10 +1,74 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Observation, ReasoningResult, ConversationTurn } from '../types.js';
-import { getPersona, buildSlowLoopPrompt, buildReasoningPrompt } from './PromptTemplates.js';
+import type { Observation, ReasoningResult, ConversationTurn, Goal, GoalEvaluationResult } from '../types.js';
+import { getPersona, buildSlowLoopPrompt, buildReasoningPrompt, buildGoalEvaluationPrompt } from './PromptTemplates.js';
 import { getRelevantMemories, loadBeliefs } from '../memory/LongTermMemory.js';
 import { summarizeKnowledge } from '../memory/KnowledgeGraph.js';
 
 const client = new Anthropic({ maxRetries: 3 });
+
+function estimateSonnetCostUSD(inputTokens: number, outputTokens: number): number {
+    const inCostPerM = 3.0;
+    const outCostPerM = 15.0;
+    return (inputTokens / 1_000_000) * inCostPerM + (outputTokens / 1_000_000) * outCostPerM;
+}
+
+function estimateHaikuCostUSD(inputTokens: number, outputTokens: number): number {
+    const inCostPerM = 0.8;
+    const outCostPerM = 4.0;
+    return (inputTokens / 1_000_000) * inCostPerM + (outputTokens / 1_000_000) * outCostPerM;
+}
+
+const DIALOGUE_TOOL: Anthropic.Tool = {
+    name: 'extract_goal_and_reply',
+    description: 'Provide dialogue response and optional structured goal extraction from conversation intent',
+    input_schema: {
+        type: 'object' as const,
+        properties: {
+            dialogue: { type: 'string', description: 'What to say in this turn (1-2 sentences)' },
+            goalExtraction: {
+                type: 'object',
+                properties: {
+                    shouldCreateGoal: { type: 'boolean' },
+                    goal: {
+                        type: 'object',
+                        properties: {
+                            type: { type: 'string' },
+                            description: { type: 'string' },
+                            priority: { type: 'number' },
+                            evaluation: {
+                                type: 'object',
+                                properties: {
+                                    successCriteria: { type: 'string' },
+                                    progressSignal: { type: 'string' },
+                                    failureSignal: { type: 'string' },
+                                    completionCondition: { type: 'string' },
+                                },
+                                required: ['successCriteria', 'progressSignal', 'failureSignal', 'completionCondition'],
+                            },
+                            estimatedDifficulty: {
+                                type: 'string',
+                                enum: ['trivial', 'simple', 'moderate', 'complex'],
+                            },
+                            needsClarification: { type: 'boolean' },
+                            clarificationQuestion: { type: 'string' },
+                            delegation: {
+                                type: 'object',
+                                properties: {
+                                    delegateToPartner: { type: 'boolean' },
+                                    delegatedTask: { type: 'boolean' },
+                                    rationale: { type: 'string' },
+                                },
+                            },
+                        },
+                        required: ['type', 'description', 'priority', 'evaluation', 'estimatedDifficulty', 'needsClarification'],
+                    },
+                },
+                required: ['shouldCreateGoal'],
+            },
+        },
+        required: ['dialogue', 'goalExtraction'],
+    },
+};
 
 export async function generateDialogue(
     npcId: string,
@@ -19,15 +83,32 @@ export async function generateDialogue(
     try {
         const response = await client.messages.create({
             model: 'claude-sonnet-4-20250514',
-            max_tokens: 200,
+            max_tokens: 350,
+            tools: [DIALOGUE_TOOL],
+            tool_choice: { type: 'tool', name: 'extract_goal_and_reply' },
             messages: [{ role: 'user', content: prompt }],
         });
 
-        const textBlock = response.content.find(b => b.type === 'text');
-        if (textBlock && textBlock.type === 'text') {
+        const toolBlock = response.content.find(b => b.type === 'tool_use');
+        if (toolBlock && toolBlock.type === 'tool_use') {
+            const input = toolBlock.input as {
+                dialogue: string;
+                goalExtraction?: ReasoningResult['goalExtraction'];
+            };
+
             return {
                 type: 'dialogue',
-                dialogue: textBlock.text.trim(),
+                dialogue: input.dialogue?.trim() || '...',
+                goalExtraction: input.goalExtraction,
+                llmUsage: {
+                    model: 'claude-sonnet-4-20250514',
+                    inputTokens: response.usage?.input_tokens ?? 0,
+                    outputTokens: response.usage?.output_tokens ?? 0,
+                    estimatedCostUSD: estimateSonnetCostUSD(
+                        response.usage?.input_tokens ?? 0,
+                        response.usage?.output_tokens ?? 0,
+                    ),
+                },
             };
         }
     } catch (err) {
@@ -121,6 +202,20 @@ const REASONING_TOOL: Anthropic.Tool = {
     },
 };
 
+const GOAL_EVAL_TOOL: Anthropic.Tool = {
+    name: 'goal_evaluation',
+    description: 'Evaluate current progress toward a goal',
+    input_schema: {
+        type: 'object' as const,
+        properties: {
+            progress_score: { type: 'number', description: '0.0 to 1.0 progress toward completion' },
+            summary: { type: 'string', description: 'One sentence summary of current progress' },
+            should_escalate: { type: 'boolean', description: 'True if goal needs deeper reasoning intervention' },
+        },
+        required: ['progress_score', 'summary', 'should_escalate'],
+    },
+};
+
 export async function generateReasoning(
     npcId: string,
     observation: Observation,
@@ -169,6 +264,15 @@ export async function generateReasoning(
             if (input.dialogue) result.dialogue = input.dialogue;
             if (input.beliefs) result.beliefs = input.beliefs;
             if (input.new_skill) result.newSkill = input.new_skill;
+            result.llmUsage = {
+                model: 'claude-sonnet-4-20250514',
+                inputTokens: response.usage?.input_tokens ?? 0,
+                outputTokens: response.usage?.output_tokens ?? 0,
+                estimatedCostUSD: estimateSonnetCostUSD(
+                    response.usage?.input_tokens ?? 0,
+                    response.usage?.output_tokens ?? 0,
+                ),
+            };
 
             return result;
         }
@@ -177,4 +281,57 @@ export async function generateReasoning(
     }
 
     return { type: 'plan', actions: [{ type: 'wait', duration: 3000 }] };
+}
+
+export async function evaluateGoalProgress(
+    npcId: string,
+    observation: Observation,
+    goal: Goal,
+): Promise<GoalEvaluationResult> {
+    const persona = getPersona(npcId);
+    const prompt = buildGoalEvaluationPrompt(persona, observation, goal);
+
+    try {
+        const response = await client.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 180,
+            tools: [GOAL_EVAL_TOOL],
+            tool_choice: { type: 'tool', name: 'goal_evaluation' },
+            messages: [{ role: 'user', content: prompt }],
+        });
+
+        const toolBlock = response.content.find(b => b.type === 'tool_use');
+        if (toolBlock && toolBlock.type === 'tool_use') {
+            const input = toolBlock.input as {
+                progress_score: number;
+                summary: string;
+                should_escalate: boolean;
+            };
+
+            return {
+                timestamp: Date.now(),
+                progressScore: Math.max(0, Math.min(1, input.progress_score)),
+                summary: input.summary,
+                shouldEscalate: input.should_escalate,
+                llmUsage: {
+                    model: 'claude-haiku-4-5-20251001',
+                    inputTokens: response.usage?.input_tokens ?? 0,
+                    outputTokens: response.usage?.output_tokens ?? 0,
+                    estimatedCostUSD: estimateHaikuCostUSD(
+                        response.usage?.input_tokens ?? 0,
+                        response.usage?.output_tokens ?? 0,
+                    ),
+                },
+            };
+        }
+    } catch (err) {
+        console.error('[SlowLoop] Goal evaluation error:', err);
+    }
+
+    return {
+        timestamp: Date.now(),
+        progressScore: 0.5,
+        summary: 'Unable to evaluate progress reliably; continuing current approach.',
+        shouldEscalate: false,
+    };
 }

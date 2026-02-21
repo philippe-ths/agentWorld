@@ -7,7 +7,10 @@ import { recordOutcome } from '../skills/SkillLibrary.js';
 
 const client = new Anthropic({ maxRetries: 3 });
 
-export async function reflect(npcId: string): Promise<void> {
+export async function reflect(
+    npcId: string,
+    context?: { activeGoals?: string[]; recentOutcomes?: string[]; goalContext?: string },
+): Promise<void> {
     const observations = getAll(npcId);
     if (observations.length < 10) return; // Not enough to reflect on
 
@@ -18,7 +21,10 @@ export async function reflect(npcId: string): Promise<void> {
         return `[${new Date(o.timestamp).toLocaleTimeString()}] At (${o.position.x},${o.position.y})${nearby}: ${o.event}`;
     });
 
-    const prompt = buildReflectionPrompt(events);
+    const prompt = buildReflectionPrompt(events, {
+        activeGoals: context?.activeGoals,
+        recentOutcomes: context?.recentOutcomes,
+    });
 
     try {
         const response = await client.messages.create({
@@ -31,7 +37,7 @@ export async function reflect(npcId: string): Promise<void> {
         if (textBlock && textBlock.type === 'text') {
             const insights = textBlock.text.split('\n').filter(l => l.trim().length > 0);
             for (const insight of insights) {
-                await addMemory(npcId, insight.replace(/^[-•*]\s*/, ''), 'insight', 0.7);
+                await addMemory(npcId, insight.replace(/^[-•*]\s*/, ''), 'insight', 0.7, context?.goalContext);
             }
         }
     } catch (err) {
@@ -47,7 +53,15 @@ export async function reflect(npcId: string): Promise<void> {
 export async function selfCritique(
     npcId: string,
     failureEvents: string[],
-    context: { skill?: string; stuckCount?: number },
+    context: {
+        skill?: string;
+        stuckCount?: number;
+        goalDescription?: string;
+        goalContext?: string;
+        evaluationCriteria?: string;
+        outcome?: string;
+        resourceCost?: string;
+    },
 ): Promise<void> {
     if (failureEvents.length === 0) return;
 
@@ -72,7 +86,7 @@ export async function selfCritique(
             for (const lesson of lessons) {
                 const cleaned = lesson.replace(/^[-•*\d.)\s]+/, '');
                 // Store as high-importance lesson (decays slower)
-                await addMemory(npcId, cleaned, 'lesson', 0.9);
+                await addMemory(npcId, cleaned, 'lesson', 0.9, context.goalContext);
                 // Also add as a world rule in the knowledge graph
                 await addRule(npcId, cleaned);
             }

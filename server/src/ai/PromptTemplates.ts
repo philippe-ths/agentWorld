@@ -1,4 +1,4 @@
-import type { NPCPersona, Observation, ConversationTurn, WorldBelief } from '../types.js';
+import type { NPCPersona, Observation, ConversationTurn, WorldBelief, Goal } from '../types.js';
 
 const NPC_PERSONAS: Record<string, NPCPersona> = {
     ada: {
@@ -46,6 +46,17 @@ export function buildMediumLoopPrompt(
         ? `\nRecent events:\n${observation.recentEvents.map(e => `  - ${e}`).join('\n')}`
         : '';
 
+    const activeGoalSection = observation.activeGoals.length > 0
+        ? `\nActive goals:\n${observation.activeGoals
+            .map((g, i) => {
+                const evalText = g.evaluation.lastEvaluation
+                    ? ` | progress=${g.evaluation.lastEvaluation.progressScore.toFixed(2)} (${g.evaluation.lastEvaluation.summary})`
+                    : ' | progress=unknown';
+                return `  ${i + 1}. [${g.status.toUpperCase()}|p=${g.priority.toFixed(2)}] ${g.description}${evalText}`;
+            })
+            .join('\n')}`
+        : '\nActive goals:\n  (none)';
+
     return `You are ${persona.name}. ${persona.personality}
 
 Your goals: ${persona.goals.join('; ')}
@@ -57,11 +68,11 @@ Current situation:
 - In conversation: ${observation.isInConversation ? 'yes' : 'no'}
 - Nearby entities:
 ${nearbyList}
-${memorySection}${eventsSection}
+${activeGoalSection}${memorySection}${eventsSection}
 
 Available skills: ${availableSkills.join(', ')}
 
-Choose one skill to execute next. Consider your personality, goals, and the current situation. If someone interesting is nearby, you might want to approach them or start a conversation. If alone, explore or idle.`;
+Choose one skill to execute next. Prioritize active commitments first, then personality goals. If a goal requires proximity to someone, prefer approach/move skills that reduce distance. If no urgent goal is active, explore or idle.`;
 }
 
 export function buildSlowLoopPrompt(
@@ -79,18 +90,33 @@ export function buildSlowLoopPrompt(
         ? `\nRelevant memories about ${partnerName}:\n${memories.map(m => `  - ${m}`).join('\n')}`
         : '';
 
+    const activeGoalSection = observation.activeGoals.length > 0
+        ? `\nCurrent active goals:\n${observation.activeGoals
+            .map((g, i) => `  ${i + 1}. [${g.status}] ${g.description} (priority ${g.priority.toFixed(2)})`)
+            .join('\n')}`
+        : '\nCurrent active goals:\n  (none)';
+
     return `You are ${persona.name}. ${persona.personality}
 
 Background: ${persona.backstory}
 Goals: ${persona.goals.join('; ')}
-${memorySection}
+${memorySection}${activeGoalSection}
 
 You are having a conversation with ${partnerName}.
 
 Conversation so far:
 ${historyText}
 
-Respond naturally as ${persona.name}. Keep your response brief (1-2 sentences). Stay in character. Be genuine and interesting. Don't repeat what was already said.`;
+Respond naturally as ${persona.name}. Keep your response brief (1-2 sentences). Stay in character. Be genuine and interesting. Don't repeat what was already said.
+
+Also decide if this conversation should create a persistent goal. A goal should be extracted only when there is a clear commitment, assignment, or intention that should influence future behavior.
+
+If one NPC asks the other to perform a subtask, include delegation metadata:
+- delegation.delegateToPartner=true when this speaker is asking the conversation partner to take on a task.
+- delegation.delegatedTask=true when this speaker is accepting a task delegated by the partner.
+- add a short delegation.rationale.
+
+If the task is ambiguous, mark needsClarification=true and provide a concise clarification question.`;
 }
 
 export function buildReasoningPrompt(
@@ -161,11 +187,23 @@ Think deeply about your situation. What should you do next? Consider:
 Provide a concrete plan of actions, any new beliefs about the world, or something to say aloud.`;
 }
 
-export function buildReflectionPrompt(events: string[]): string {
+export function buildReflectionPrompt(
+    events: string[],
+    context?: { activeGoals?: string[]; recentOutcomes?: string[] },
+): string {
+    const goalSection = context?.activeGoals && context.activeGoals.length > 0
+        ? `\nActive goals during this period:\n${context.activeGoals.map(g => `- ${g}`).join('\n')}`
+        : '';
+
+    const outcomeSection = context?.recentOutcomes && context.recentOutcomes.length > 0
+        ? `\nRecent goal outcomes:\n${context.recentOutcomes.map(o => `- ${o}`).join('\n')}`
+        : '';
+
     return `Review these recent observations and distill them into 1-3 key insights. Focus on patterns, relationships, and useful knowledge.
 
 Observations:
 ${events.map(e => `- ${e}`).join('\n')}
+${goalSection}${outcomeSection}
 
 Write each insight as a single concise sentence.`;
 }
@@ -173,7 +211,14 @@ Write each insight as a single concise sentence.`;
 export function buildSelfCritiquePrompt(
     persona: NPCPersona,
     failureEvents: string[],
-    context: { skill?: string; stuckCount?: number },
+    context: {
+        skill?: string;
+        stuckCount?: number;
+        goalDescription?: string;
+        evaluationCriteria?: string;
+        outcome?: string;
+        resourceCost?: string;
+    },
 ): string {
     return `You are ${persona.name}. ${persona.personality}
 
@@ -182,6 +227,10 @@ ${failureEvents.map(e => `- ${e}`).join('\n')}
 
 ${context.skill ? `The skill you were using: "${context.skill}"` : ''}
 ${context.stuckCount ? `You got stuck ${context.stuckCount} times.` : ''}
+${context.goalDescription ? `Goal: "${context.goalDescription}"` : ''}
+${context.evaluationCriteria ? `Evaluation criteria: ${context.evaluationCriteria}` : ''}
+${context.outcome ? `Outcome: ${context.outcome}` : ''}
+${context.resourceCost ? `Resource cost: ${context.resourceCost}` : ''}
 
 Analyze what went wrong. Write 1-2 specific, actionable lessons learned. Each lesson should be a single sentence that will help you avoid this exact mistake in the future.
 
@@ -191,4 +240,34 @@ Examples of good lessons:
 - "When stuck repeatedly, try wandering in a different direction instead of the same path."
 
 Write only the lessons, one per line.`;
+}
+
+export function buildGoalEvaluationPrompt(
+    persona: NPCPersona,
+    observation: Observation,
+    goal: Goal,
+): string {
+    const nearbyList = observation.nearbyEntities.length > 0
+        ? observation.nearbyEntities.map(e => `${e.name} (${e.distance} tiles)`).join(', ')
+        : 'nobody nearby';
+
+    return `You are ${persona.name}. Evaluate progress on your active goal.
+
+GOAL: "${goal.description}"
+SUCCESS CRITERIA: ${goal.evaluation.successCriteria}
+PROGRESS SIGNAL: ${goal.evaluation.progressSignal}
+FAILURE SIGNAL: ${goal.evaluation.failureSignal}
+COMPLETION CONDITION: ${goal.evaluation.completionCondition}
+
+CURRENT STATE:
+- Position: (${observation.position.x}, ${observation.position.y})
+- Current skill: ${observation.currentSkill ?? 'none'}
+- Nearby: ${nearbyList}
+- Recent events:
+${observation.recentEvents.length > 0 ? observation.recentEvents.map(e => `  - ${e}`).join('\n') : '  - none'}
+
+Return an evaluation with:
+- progress_score (0.0-1.0)
+- summary (one sentence)
+- should_escalate (true if goal needs deep reasoning help)`;
 }

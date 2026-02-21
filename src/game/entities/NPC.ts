@@ -1,6 +1,6 @@
 import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
-import { Action } from '../ai/types';
+import { Action, Goal } from '../ai/types';
 import { AgentLoop } from '../ai/AgentLoop';
 import type { EntityManager } from './EntityManager';
 import { log as logEvent } from '../ui/EventLog';
@@ -14,6 +14,7 @@ export class NPC extends Entity {
     isInConversation = false;
     currentSkill: string | null = null;
     recentEvents: string[] = [];
+    activeGoals: Goal[] = [];
 
     // Callback fired when the NPC finishes its current plan
     onPlanComplete?: (hadFailure: boolean) => void;
@@ -44,11 +45,35 @@ export class NPC extends Entity {
         this.currentPlan = [];
         this.recentEvents = [];
         this.currentSkill = null;
+        this.activeGoals = [];
         this.isInConversation = false;
         this.tilePos = { ...startTile };
         const worldPos = this.map.tileToWorldXY(startTile.x, startTile.y)!;
         this.sprite.setPosition(worldPos.x + 32, worldPos.y + 16);
         this.updateDepth();
+    }
+
+    addGoal(goal: Goal): 'added' | 'replaced' | 'ignored' {
+        if (this.activeGoals.length < 3) {
+            this.activeGoals.push(goal);
+            this.activeGoals.sort((a, b) => b.priority - a.priority);
+            return 'added';
+        }
+
+        let lowestIdx = 0;
+        for (let i = 1; i < this.activeGoals.length; i++) {
+            if (this.activeGoals[i].priority < this.activeGoals[lowestIdx].priority) {
+                lowestIdx = i;
+            }
+        }
+
+        if (goal.priority > this.activeGoals[lowestIdx].priority) {
+            this.activeGoals[lowestIdx] = goal;
+            this.activeGoals.sort((a, b) => b.priority - a.priority);
+            return 'replaced';
+        }
+
+        return 'ignored';
     }
 
     setPlan(actions: Action[]) {
@@ -129,6 +154,6 @@ export class NPC extends Entity {
         if (this.recentEvents.length > 20) {
             this.recentEvents.shift();
         }
-        logEvent(this.name, 'action', event);
+        logEvent(this.name, 'action', event, { npcId: this.id });
     }
 }

@@ -2,8 +2,9 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { Memory, Observation, WorldBelief, TilePos } from '../types.js';
+import type { Memory, Observation, WorldBelief, TilePos, Goal } from '../types.js';
 import { embed, cosineSimilarity } from './Embeddings.js';
+import { trackGoalCompute } from '../goals/ResourceLedger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '../../data');
@@ -42,7 +43,18 @@ async function saveMemories(npcId: string, memories: Memory[]) {
     await writeFile(memoryFile(npcId), JSON.stringify(memories, null, 2));
 }
 
-export function addMemory(npcId: string, text: string, type: Memory['type'], importance = 0.5) {
+function goalContextKey(goal: Goal | undefined): string | undefined {
+    if (!goal) return undefined;
+    return `${goal.type}:${goal.description.toLowerCase()}`;
+}
+
+export function addMemory(
+    npcId: string,
+    text: string,
+    type: Memory['type'],
+    importance = 0.5,
+    goalContext?: string,
+) {
     return withLock(npcId, async () => {
     const memories = await loadMemories(npcId);
     let embedding: number[] | undefined;
@@ -59,6 +71,7 @@ export function addMemory(npcId: string, text: string, type: Memory['type'], imp
         timestamp: Date.now(),
         accessCount: 0,
         embedding,
+        goalContext,
     });
     await saveMemories(npcId, memories);
     });
@@ -69,6 +82,9 @@ export function getRelevantMemories(npcId: string, observation: Observation): Pr
     const memories = await loadMemories(npcId);
     if (memories.length === 0) return [];
 
+    const activeGoal = observation.activeGoals.find(g => g.status === 'active');
+    const activeGoalContext = goalContextKey(activeGoal);
+
     // Build query text from observation context
     const queryParts: string[] = [];
     for (const e of observation.nearbyEntities) {
@@ -78,12 +94,20 @@ export function getRelevantMemories(npcId: string, observation: Observation): Pr
         queryParts.push(ev);
     }
     if (observation.currentSkill) queryParts.push(observation.currentSkill);
+    for (const g of observation.activeGoals) {
+        if (g.status === 'active') {
+            queryParts.push(g.description, g.type);
+        }
+    }
     const queryText = queryParts.join('. ');
 
     // Try embedding-based retrieval first
     let queryEmbedding: number[] | undefined;
     try {
         if (queryText.length > 0) {
+            if (activeGoal) {
+                trackGoalCompute(activeGoal.id, npcId, { embeddingCalls: 1 });
+            }
             queryEmbedding = await embed(queryText);
         }
     } catch {
@@ -117,6 +141,11 @@ export function getRelevantMemories(npcId: string, observation: Observation): Pr
 
         // Access frequency boost (frequently retrieved = more useful)
         score += Math.min(m.accessCount * 0.05, 0.5);
+
+        // Goal context boost for repeated-task learning.
+        if (activeGoalContext && m.goalContext && m.goalContext === activeGoalContext) {
+            score += 0.2;
+        }
 
         m.accessCount++;
         return { memory: m, score };

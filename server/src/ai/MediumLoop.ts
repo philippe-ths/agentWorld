@@ -6,6 +6,13 @@ import { getRelevantMemories } from '../memory/LongTermMemory.js';
 
 const client = new Anthropic({ maxRetries: 3 });
 
+function estimateHaikuCostUSD(inputTokens: number, outputTokens: number): number {
+    // Approximate list pricing per 1M tokens (kept lightweight for simulation economics).
+    const inCostPerM = 0.8;
+    const outCostPerM = 4.0;
+    return (inputTokens / 1_000_000) * inCostPerM + (outputTokens / 1_000_000) * outCostPerM;
+}
+
 export async function mediumLoopTick(observation: Observation): Promise<SkillSelection> {
     const persona = getPersona(observation.npcId);
     const skills = getMatchingSkills(observation);
@@ -56,7 +63,10 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
 
         const toolBlock = response.content.find(b => b.type === 'tool_use');
         if (toolBlock && toolBlock.type === 'tool_use') {
-            const input = toolBlock.input as { skill: string; params: Record<string, unknown> };
+            const input = toolBlock.input as { skill: string; params: Record<string, unknown>; reasoning?: string };
+
+            const inputTokens = response.usage?.input_tokens ?? 0;
+            const outputTokens = response.usage?.output_tokens ?? 0;
 
             // If converse is selected, escalate to slow loop for dialogue
             const escalate = input.skill === 'converse';
@@ -65,6 +75,13 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
                 skill: input.skill,
                 params: input.params ?? {},
                 escalate,
+                reasoning: input.reasoning,
+                llmUsage: {
+                    model: 'claude-haiku-4-5-20251001',
+                    inputTokens,
+                    outputTokens,
+                    estimatedCostUSD: estimateHaikuCostUSD(inputTokens, outputTokens),
+                },
             };
         }
     } catch (err) {

@@ -12,6 +12,12 @@ vi.mock('../ai/MediumLoop.js', () => ({
 vi.mock('../ai/SlowLoop.js', () => ({
     generateDialogue: vi.fn(async () => ({ type: 'dialogue', dialogue: 'Hello!' })),
     generateReasoning: vi.fn(async () => ({ type: 'plan', actions: [{ type: 'wait', duration: 2000 }] })),
+    evaluateGoalProgress: vi.fn(async () => ({
+        timestamp: Date.now(),
+        progressScore: 0.7,
+        summary: 'On track',
+        shouldEscalate: false,
+    })),
 }));
 
 vi.mock('../memory/ShortTermBuffer.js', () => ({
@@ -95,6 +101,7 @@ const validObservation = {
     isInConversation: false,
     currentSkill: null,
     recentEvents: [],
+    activeGoals: [],
 };
 
 describe('API Endpoints', () => {
@@ -111,6 +118,18 @@ describe('API Endpoints', () => {
             const { status, data } = await get('/api/health');
             expect(status).toBe(200);
             expect(data.status).toBe('ok');
+        });
+    });
+
+    describe('GET /api/stats/resources', () => {
+        it('returns aggregate resource stats payload', async () => {
+            const { status, data } = await get('/api/stats/resources');
+            expect(status).toBe(200);
+            expect(typeof data.goalsTracked).toBe('number');
+            expect(typeof data.totalTokensIn).toBe('number');
+            expect(typeof data.totalTokensOut).toBe('number');
+            expect(typeof data.estimatedCostUSD).toBe('number');
+            expect(Array.isArray(data.goals)).toBe(true);
         });
     });
 
@@ -216,6 +235,85 @@ describe('API Endpoints', () => {
             const { status } = await post('/api/npc/skill-outcome', {
                 skill: 'wander',
                 success: 'yes',
+            });
+            expect(status).toBe(400);
+        });
+    });
+
+    describe('POST /api/npc/goal/evaluate', () => {
+        const goalPayload = {
+            id: 'goal_ada_1',
+            npcId: 'ada',
+            type: 'follow',
+            description: 'Follow Player closely',
+            source: { type: 'player_dialogue', assignedBy: 'Player' },
+            evaluation: {
+                successCriteria: 'remain within 3 tiles of Player',
+                progressSignal: 'distance to Player',
+                failureSignal: 'distance > 10 tiles for prolonged period',
+                completionCondition: 'Player says stop',
+            },
+            status: 'active',
+            priority: 0.9,
+            createdAt: Date.now(),
+            expiresAt: null,
+            resources: {
+                totalTokensIn: 0,
+                totalTokensOut: 0,
+                estimatedCostUSD: 0,
+                haikuCalls: 0,
+                sonnetCalls: 0,
+                embeddingCalls: 0,
+                pathfindingCalls: 0,
+                evaluationCalls: 0,
+                wallClockMs: 0,
+                apiLatencyMs: 0,
+                mediumLoopTicks: 0,
+            },
+            parentGoalId: null,
+            delegatedTo: null,
+            delegatedFrom: null,
+        };
+
+        it('returns evaluation result', async () => {
+            const { status, data } = await post('/api/npc/goal/evaluate', {
+                npcId: 'ada',
+                observation: validObservation,
+                goal: goalPayload,
+            });
+            expect(status).toBe(200);
+            expect(typeof data.progressScore).toBe('number');
+            expect(typeof data.summary).toBe('string');
+            expect(typeof data.shouldEscalate).toBe('boolean');
+        });
+
+        it('rejects invalid payload', async () => {
+            const { status } = await post('/api/npc/goal/evaluate', {
+                npcId: 'ada',
+                observation: validObservation,
+            });
+            expect(status).toBe(400);
+        });
+    });
+
+    describe('POST /api/npc/commitment', () => {
+        it('records commitment relation', async () => {
+            const { status, data } = await post('/api/npc/commitment', {
+                npcId: 'ada',
+                from: 'Ada',
+                to: 'Bjorn',
+                goalId: 'goal_ada_1',
+                description: 'Go to pond near (30,15)',
+                status: 'agreed',
+            });
+            expect(status).toBe(200);
+            expect(data.status).toBe('recorded');
+        });
+
+        it('rejects invalid commitment payload', async () => {
+            const { status } = await post('/api/npc/commitment', {
+                npcId: 'ada',
+                from: 'Ada',
             });
             expect(status).toBe(400);
         });

@@ -71,6 +71,10 @@ export class ConversationManager {
 
         npc1.addEvent(`started conversation with ${npc2.name}`);
         npc2.addEvent(`started conversation with ${npc1.name}`);
+        logEvent(npc1.name, 'system', `conversation started with ${npc2.name}`,
+            { npcId: npc1.id, relatedNpcId: npc2.id });
+        logEvent(npc2.name, 'system', `conversation started with ${npc1.name}`,
+            { npcId: npc2.id, relatedNpcId: npc1.id });
 
         // Run conversation turns
         await this.runConversation(conv);
@@ -84,18 +88,131 @@ export class ConversationManager {
             const listener = turn % 2 === 0 ? npc2 : npc1;
 
             const observation = this.buildObservation(speaker, listener);
+
+            const t0 = performance.now();
             const result = await AgentClient.reason(
                 speaker.id,
                 observation,
                 conv.history,
                 listener.name,
             );
+            const latency = Math.round(performance.now() - t0);
 
             if (!conv.active) break;
 
+            logEvent(speaker.name, 'llm-call',
+                `dialogue generation — ${latency}ms`,
+                { npcId: speaker.id, relatedNpcId: listener.id, metadata: { model: 'claude-sonnet-4', latency } },
+            );
+
             const text = result.dialogue ?? '...';
+
+            if (result.goalExtraction?.shouldCreateGoal && result.goalExtraction.goal) {
+                const now = Date.now();
+                const extracted = result.goalExtraction.goal;
+                const goal = {
+                    id: `goal_${speaker.id}_${now}`,
+                    npcId: speaker.id,
+                    type: extracted.type,
+                    description: extracted.description,
+                    source: {
+                        type: 'npc_dialogue' as const,
+                        conversationId: conv.id,
+                        assignedBy: listener.name,
+                    },
+                    evaluation: extracted.evaluation,
+                    status: 'active' as const,
+                    priority: Math.max(0, Math.min(1, extracted.priority)),
+                    createdAt: now,
+                    expiresAt: null,
+                    resources: {
+                        totalTokensIn: 0,
+                        totalTokensOut: 0,
+                        estimatedCostUSD: 0,
+                        haikuCalls: 0,
+                        sonnetCalls: 0,
+                        embeddingCalls: 0,
+                        pathfindingCalls: 0,
+                        evaluationCalls: 0,
+                        wallClockMs: 0,
+                        apiLatencyMs: 0,
+                        mediumLoopTicks: 0,
+                    },
+                    parentGoalId: null,
+                    delegatedTo: null,
+                    delegatedFrom: null,
+                    estimatedDifficulty: extracted.estimatedDifficulty,
+                };
+
+                const outcome = speaker.addGoal(goal);
+                logEvent(speaker.name, 'system',
+                    outcome === 'ignored'
+                        ? `declined goal (low priority): ${goal.description}`
+                        : `accepted goal: ${goal.description}`,
+                    { npcId: speaker.id, relatedNpcId: listener.id },
+                );
+
+                // Delegation support: speaker can assign partner a mirrored delegated sub-goal.
+                if (extracted.delegation?.delegateToPartner) {
+                    goal.delegatedTo = listener.id;
+                    const delegated = {
+                        ...goal,
+                        id: `${goal.id}_delegated_${listener.id}`,
+                        npcId: listener.id,
+                        source: {
+                            type: 'delegated' as const,
+                            conversationId: conv.id,
+                            assignedBy: speaker.name,
+                        },
+                        parentGoalId: goal.id,
+                        delegatedTo: null,
+                        delegatedFrom: speaker.id,
+                    };
+
+                    const delegatedOutcome = listener.addGoal(delegated);
+                    logEvent(listener.name, 'system',
+                        delegatedOutcome === 'ignored'
+                            ? `declined delegated task from ${speaker.name}: ${delegated.description}`
+                            : `accepted delegated task from ${speaker.name}: ${delegated.description}`,
+                        { npcId: listener.id, relatedNpcId: speaker.id },
+                    );
+
+                    if (delegatedOutcome !== 'ignored') {
+                        AgentClient.reportCommitment(
+                            speaker.id,
+                            speaker.name,
+                            listener.name,
+                            goal.id,
+                            goal.description,
+                            'agreed',
+                        );
+                        AgentClient.reportCommitment(
+                            listener.id,
+                            speaker.name,
+                            listener.name,
+                            delegated.id,
+                            delegated.description,
+                            'in_progress',
+                        );
+                    }
+                }
+
+                if (extracted.delegation?.delegatedTask) {
+                    goal.delegatedFrom = listener.id;
+                    AgentClient.reportCommitment(
+                        speaker.id,
+                        listener.name,
+                        speaker.name,
+                        goal.id,
+                        goal.description,
+                        'in_progress',
+                    );
+                }
+            }
+
             conv.history.push({ speaker: speaker.name, text });
-            logEvent(speaker.name, 'conversation', `→ ${listener.name}: ${text}`);
+            logEvent(speaker.name, 'conversation', `→ ${listener.name}: ${text}`,
+                { npcId: speaker.id, relatedNpcId: listener.id });
 
             // Show speech bubble
             speaker.say(text, SPEECH_DURATION);
@@ -120,6 +237,10 @@ export class ConversationManager {
 
         npc1.addEvent(`ended conversation with ${npc2.name}`);
         npc2.addEvent(`ended conversation with ${npc1.name}`);
+        logEvent(npc1.name, 'system', `conversation ended with ${npc2.name}`,
+            { npcId: npc1.id, relatedNpcId: npc2.id });
+        logEvent(npc2.name, 'system', `conversation ended with ${npc1.name}`,
+            { npcId: npc2.id, relatedNpcId: npc1.id });
 
         this.conversations.delete(conv.id);
     }
@@ -140,6 +261,7 @@ export class ConversationManager {
             isInConversation: true,
             currentSkill: 'converse',
             recentEvents: [...speaker.recentEvents],
+            activeGoals: speaker.activeGoals.map(g => ({ ...g })),
         };
     }
 

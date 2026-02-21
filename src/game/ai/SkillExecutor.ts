@@ -3,6 +3,7 @@ import type { EntityManager } from '../entities/EntityManager';
 import type { Action } from './types';
 import { findPath } from './Pathfinding';
 import { MAP_WIDTH, MAP_HEIGHT } from '../MapData';
+import { log as logEvent } from '../ui/EventLog';
 
 // Composed skill definitions received from server
 const composedSkills = new Map<string, string[]>();
@@ -24,21 +25,58 @@ export function executeSkill(
         for (const step of steps) {
             allActions.push(...executeSkill(npc, step, params, entityManager));
         }
+        logEvent(npc.name, 'action', `composed skill "${skill}" → ${allActions.length} actions (${steps.join(' → ')})`,
+            { npcId: npc.id });
         return allActions;
     }
 
+    let actions: Action[];
     switch (skill) {
         case 'wander':
-            return wanderActions(npc, entityManager);
+            actions = wanderActions(npc, entityManager);
+            break;
         case 'move_to':
-            return moveToActions(npc, params, entityManager);
+            actions = moveToActions(npc, params, entityManager);
+            break;
         case 'approach_entity':
-            return approachActions(npc, params, entityManager);
+            actions = approachActions(npc, params, entityManager);
+            break;
         case 'idle':
-            return idleActions(params);
+            actions = idleActions(params);
+            break;
         default:
-            return idleActions({ duration: 2000 });
+            actions = idleActions({ duration: 2000 });
+            break;
     }
+
+    // Log the generated plan
+    const desc = summarizeActions(skill, actions, params);
+    logEvent(npc.name, 'action', desc, { npcId: npc.id });
+
+    return actions;
+}
+
+function summarizeActions(skill: string, actions: Action[], params: Record<string, unknown>): string {
+    if (skill === 'wander') {
+        const moves = actions.filter(a => a.type === 'move');
+        if (moves.length > 0) {
+            const last = moves[moves.length - 1] as { target: { x: number; y: number } };
+            return `wander → ${moves.length}-tile path to (${last.target.x},${last.target.y})`;
+        }
+        return 'wander → idle (no path found)';
+    }
+    if (skill === 'move_to') {
+        const moves = actions.filter(a => a.type === 'move');
+        return `move_to (${params.targetX},${params.targetY}) → ${moves.length}-tile path`;
+    }
+    if (skill === 'approach_entity') {
+        const moves = actions.filter(a => a.type === 'move');
+        return `approach ${params.entityName} → ${moves.length}-tile path`;
+    }
+    if (skill === 'idle') {
+        return `idle for ${params.duration ?? 3000}ms`;
+    }
+    return `${skill} → ${actions.length} actions`;
 }
 
 function wanderActions(npc: NPC, entityManager: EntityManager): Action[] {
@@ -51,6 +89,8 @@ function wanderActions(npc: NPC, entityManager: EntityManager): Action[] {
         if (tx < 0 || tx >= MAP_WIDTH || ty < 0 || ty >= MAP_HEIGHT) continue;
         if (!entityManager.isWalkable(tx, ty)) continue;
 
+        const activeGoal = npc.activeGoals.find(g => g.status === 'active');
+        if (activeGoal) activeGoal.resources.pathfindingCalls++;
         const path = findPath(npc.tilePos, { x: tx, y: ty }, entityManager.isWalkable);
         if (path.length > 0 && path.length <= 15) {
             return path.map(p => ({ type: 'move' as const, target: p }));
@@ -68,6 +108,8 @@ function moveToActions(
     const targetX = typeof params.targetX === 'number' ? params.targetX : npc.tilePos.x;
     const targetY = typeof params.targetY === 'number' ? params.targetY : npc.tilePos.y;
 
+    const activeGoal = npc.activeGoals.find(g => g.status === 'active');
+    if (activeGoal) activeGoal.resources.pathfindingCalls++;
     const path = findPath(npc.tilePos, { x: targetX, y: targetY }, entityManager.isWalkable);
     if (path.length > 0) {
         return path.map(p => ({ type: 'move' as const, target: p }));
@@ -92,6 +134,8 @@ function approachActions(
         const ax = target.tilePos.x + d.x;
         const ay = target.tilePos.y + d.y;
         if (entityManager.isWalkable(ax, ay)) {
+            const activeGoal = npc.activeGoals.find(g => g.status === 'active');
+            if (activeGoal) activeGoal.resources.pathfindingCalls++;
             const path = findPath(npc.tilePos, { x: ax, y: ay }, entityManager.isWalkable);
             if (path.length > 0) {
                 return path.map(p => ({ type: 'move' as const, target: p }));

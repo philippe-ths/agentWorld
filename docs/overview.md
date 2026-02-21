@@ -15,16 +15,16 @@ An isometric Phaser 3 game where AI-driven NPCs act autonomously using a **three
 ## Three-Loop Architecture
 
 ```
-┌──────────────┐   every frame   ┌──────────────┐   every 15s   ┌──────────────┐
-│  Fast Loop   │ ◄────────────── │ Medium Loop  │ ◄──────────── │  Slow Loop   │
-│  (client)    │  execute plan   │  (Haiku)     │   escalate    │  (Sonnet)    │
-│  move/wait   │                 │  pick skill  │               │  reason/talk │
-└──────────────┘                 └──────────────┘               └──────────────┘
+┌──────────────┐   every frame   ┌──────────────┐   every 15s   ┌───────────────────┐
+│  Fast Loop   │ ◄────────────── │ Medium Loop  │ ◄──────────── │  Slow Loop        │
+│  (client)    │  execute plan   │  (Haiku)     │   escalate    │  (Sonnet)         │
+│  move/wait   │                 │  pick skill  │               │reason/plan/talk   │
+└──────────────┘                 └──────────────┘               └───────────────────┘
 ```
 
 - **Fast loop** — runs every frame on the client; executes move/wait/speak actions from the current plan.
 - **Medium loop** — fires every 15 s (staggered per NPC); calls Haiku to select the next skill.
-- **Slow loop** — invoked on escalation (conversation or stuck recovery); calls Sonnet for dialogue or deep reasoning.
+- **Slow loop** — invoked on escalation (conversation or stuck recovery); calls Sonnet for dialogue, deep reasoning, or structured planning.
 
 ## Project Layout
 

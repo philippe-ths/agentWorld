@@ -4,7 +4,7 @@ import type { Observation, NearbyEntity, ReasoningResult } from './types';
 import * as AgentClient from './AgentClient';
 import { executeSkill, registerComposedSkill } from './SkillExecutor';
 import { log as logEvent } from '../ui/EventLog';
-import type { Goal, LLMUsage } from './types';
+import type { Goal, LLMUsage, PlanStep } from './types';
 
 const BASE_TICK_INTERVAL = 15000;
 const IDLE_TICK_INTERVAL = 60000;
@@ -75,6 +75,26 @@ export class AgentLoop {
         }
     }
 
+    private static readonly DIFFICULTY_TIERS: Array<'trivial' | 'simple' | 'moderate' | 'complex'> = [
+        'trivial', 'simple', 'moderate', 'complex',
+    ];
+
+    private upgradeDifficulty(goal: Goal): boolean {
+        const current = goal.estimatedDifficulty ?? 'moderate';
+        const idx = AgentLoop.DIFFICULTY_TIERS.indexOf(current);
+        if (idx < AgentLoop.DIFFICULTY_TIERS.length - 1) {
+            goal.estimatedDifficulty = AgentLoop.DIFFICULTY_TIERS[idx + 1];
+            return true;
+        }
+        return false;
+    }
+
+    private isScoreImproving(goal: Goal): boolean {
+        const history = goal.evaluation.evaluationHistory ?? [];
+        if (history.length < 2) return false;
+        return history[history.length - 1] - history[history.length - 2] >= 0.15;
+    }
+
     private applyUsage(goal: Goal | undefined, usage: LLMUsage | undefined, modelKind: 'haiku' | 'sonnet') {
         if (!goal || !usage) return;
         goal.resources.totalTokensIn += usage.inputTokens;
@@ -139,6 +159,7 @@ export class AgentLoop {
                     progressScore: evalResult.progressScore,
                     summary: evalResult.summary,
                     shouldEscalate: evalResult.shouldEscalate,
+                    gapAnalysis: evalResult.gapAnalysis,
                 };
                 activeGoal.resources.evaluationCalls++;
                 activeGoal.resources.apiLatencyMs += evalLatency;
@@ -161,14 +182,34 @@ export class AgentLoop {
                 const diminishingReturns = this.isDiminishingReturns(activeGoal);
                 if ((evalResult.shouldEscalate || diminishingReturns) && activeGoal.status === 'active') {
                     const budget = this.getEscalationBudget(activeGoal);
-                    if (activeGoal.resources.sonnetCalls >= budget) {
-                        this.finalizeGoal(activeGoal, 'abandoned');
-                        this.npc.addEvent(`abandoned goal (budget exhausted): ${activeGoal.description}`);
-                        logEvent(this.npc.name, 'system',
-                            `goal abandoned after ${activeGoal.resources.sonnetCalls} sonnet calls (budget ${budget})`,
-                            { npcId: this.npc.id, metadata: { goalId: activeGoal.id, budget } },
-                        );
-                        return;
+                    const unproductive = activeGoal.resources.unproductiveEscalations ?? 0;
+                    if (unproductive >= budget) {
+                        // C1: Upgrade difficulty if score is improving
+                        if (this.isScoreImproving(activeGoal) && this.upgradeDifficulty(activeGoal)) {
+                            logEvent(this.npc.name, 'system',
+                                `goal difficulty upgraded to ${activeGoal.estimatedDifficulty}, budget extended`,
+                                { npcId: this.npc.id, metadata: { goalId: activeGoal.id } },
+                            );
+                        // C2: Completion runway — grant one extra call if progress ≥ 0.5 and improving
+                        } else if (
+                            evalResult.progressScore >= 0.5 &&
+                            this.isScoreImproving(activeGoal) &&
+                            !activeGoal.resources.runwayUsed
+                        ) {
+                            activeGoal.resources.runwayUsed = true;
+                            logEvent(this.npc.name, 'system',
+                                `goal runway granted (progress ${evalResult.progressScore.toFixed(2)}, improving)`,
+                                { npcId: this.npc.id, metadata: { goalId: activeGoal.id } },
+                            );
+                        } else {
+                            this.finalizeGoal(activeGoal, 'abandoned');
+                            this.npc.addEvent(`abandoned goal (budget exhausted): ${activeGoal.description}`);
+                            logEvent(this.npc.name, 'system',
+                                `goal abandoned after ${unproductive} unproductive escalations (budget ${budget})`,
+                                { npcId: this.npc.id, metadata: { goalId: activeGoal.id, budget } },
+                            );
+                            return;
+                        }
                     }
 
                     this.npc.addEvent(`goal needs escalation: ${activeGoal.description}`);
@@ -189,7 +230,7 @@ export class AgentLoop {
                         { npcId: this.npc.id, metadata: { model: 'claude-sonnet-4', latency, goalId: activeGoal.id } },
                     );
 
-                    this.handleReasoningResult(reasonResult);
+                    this.handleReasoningResult(reasonResult, activeGoal);
                     return;
                 }
             }
@@ -218,7 +259,7 @@ export class AgentLoop {
                     { npcId: this.npc.id, metadata: { model: 'claude-sonnet-4', latency, escalated: true } },
                 );
 
-                this.handleReasoningResult(reasonResult);
+                this.handleReasoningResult(reasonResult, activeGoalForReasoning);
 
                 // Report the failure for self-critique
                 const failureEvents = this.npc.recentEvents.filter(e => e.includes('stuck'));
@@ -262,8 +303,23 @@ export class AgentLoop {
                 );
 
                 if (result.escalate && result.skill === 'converse') {
-                    this.npc.addEvent('wants to converse');
+                    // D2: Conversation priority ceiling — only converse if goal-relevant or no high-priority goal
+                    const topGoal = this.npc.activeGoals.find(g => g.status === 'active');
                     const nearby = observation.nearbyEntities[0];
+                    if (topGoal && topGoal.priority >= 0.7 && nearby) {
+                        const goalText = (topGoal.description + ' ' + (topGoal.evaluation.lastEvaluation?.gapAnalysis ?? '')).toLowerCase();
+                        const targetName = nearby.name.toLowerCase();
+                        if (!goalText.includes(targetName)) {
+                            // Target not mentioned in goal — skip social conversation, re-tick soon
+                            logEvent(this.npc.name, 'thought',
+                                `skipping conversation with ${nearby.name} — not relevant to active goal`,
+                                { npcId: this.npc.id },
+                            );
+                            this.npc.setPlan([{ type: 'wait', duration: 2000 }]);
+                            return;
+                        }
+                    }
+                    this.npc.addEvent('wants to converse');
                     if (nearby) {
                         const event = new CustomEvent('npc-wants-converse', {
                             detail: { npcId: this.npc.id, targetName: nearby.name },
@@ -292,14 +348,35 @@ export class AgentLoop {
         this.npc.recentEvents = this.npc.recentEvents.filter(e => !e.includes('stuck'));
     }
 
-    private handleReasoningResult(result: ReasoningResult) {
+    private handleReasoningResult(result: ReasoningResult, activeGoal?: Goal) {
         // Register any new composed skill for client-side execution
         if (result.newSkill?.steps && result.newSkill.steps.length > 0) {
             registerComposedSkill(result.newSkill.name, result.newSkill.steps);
             this.npc.addEvent(`learned new skill: ${result.newSkill.name}`);
         }
 
+        const hasConcreteOutput = (result.actions && result.actions.length > 0) || result.newSkill;
+
+        // D3: Track escalation quality for budget accounting
+        if (activeGoal) {
+            if (hasConcreteOutput) {
+                activeGoal.resources.productiveEscalations = (activeGoal.resources.productiveEscalations ?? 0) + 1;
+            } else {
+                activeGoal.resources.unproductiveEscalations = (activeGoal.resources.unproductiveEscalations ?? 0) + 1;
+            }
+        }
+
         if (result.actions && result.actions.length > 0) {
+            // B4: Store plan agenda on the active goal for medium-loop reference
+            if (activeGoal && result.actions.length > 1) {
+                activeGoal.planAgenda = result.actions.map(a => {
+                    switch (a.type) {
+                        case 'move': return { skill: 'move_to', target: `(${a.target.x}, ${a.target.y})`, purpose: 'move to target', done: false } as PlanStep;
+                        case 'speak': return { skill: 'speak', target: a.target, purpose: a.text ?? 'say something', done: false } as PlanStep;
+                        default: return { skill: 'wait', purpose: 'pause', done: false } as PlanStep;
+                    }
+                });
+            }
             this.npc.setPlan(result.actions);
             this.npc.addEvent('received plan from reasoning');
         } else if (result.dialogue) {

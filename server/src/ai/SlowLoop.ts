@@ -136,7 +136,7 @@ const REASONING_TOOL: Anthropic.Tool = {
             },
             plan: {
                 type: 'array',
-                description: 'A sequence of actions to execute (for plan type)',
+                description: 'A sequence of actions to execute (for plan type). Each action should advance a specific goal.',
                 items: {
                     type: 'object',
                     properties: {
@@ -145,6 +145,7 @@ const REASONING_TOOL: Anthropic.Tool = {
                         targetY: { type: 'number', description: 'Target tile Y (for move)' },
                         duration: { type: 'number', description: 'Duration in ms (for wait)' },
                         text: { type: 'string', description: 'Text to say (for speak)' },
+                        purpose: { type: 'string', description: 'Why this action advances the goal (e.g. "travel to Cora\'s last known area")' },
                     },
                     required: ['action'],
                 },
@@ -211,8 +212,9 @@ const GOAL_EVAL_TOOL: Anthropic.Tool = {
             progress_score: { type: 'number', description: '0.0 to 1.0 progress toward completion' },
             summary: { type: 'string', description: 'One sentence summary of current progress' },
             should_escalate: { type: 'boolean', description: 'True if goal needs deeper reasoning intervention' },
+            gap_analysis: { type: 'string', description: 'What remains to be done. List each sub-condition and whether it is met or not. Be specific about entities, locations, and next steps.' },
         },
-        required: ['progress_score', 'summary', 'should_escalate'],
+        required: ['progress_score', 'summary', 'should_escalate', 'gap_analysis'],
     },
 };
 
@@ -294,7 +296,7 @@ export async function evaluateGoalProgress(
     try {
         const response = await client.messages.create({
             model: 'claude-haiku-4-5-20251001',
-            max_tokens: 180,
+            max_tokens: 250,
             tools: [GOAL_EVAL_TOOL],
             tool_choice: { type: 'tool', name: 'goal_evaluation' },
             messages: [{ role: 'user', content: prompt }],
@@ -306,6 +308,7 @@ export async function evaluateGoalProgress(
                 progress_score: number;
                 summary: string;
                 should_escalate: boolean;
+                gap_analysis?: string;
             };
 
             return {
@@ -313,6 +316,7 @@ export async function evaluateGoalProgress(
                 progressScore: Math.max(0, Math.min(1, input.progress_score)),
                 summary: input.summary,
                 shouldEscalate: input.should_escalate,
+                gapAnalysis: input.gap_analysis,
                 llmUsage: {
                     model: 'claude-haiku-4-5-20251001',
                     inputTokens: response.usage?.input_tokens ?? 0,

@@ -50,12 +50,15 @@ export class ConversationManager {
 
     private async startConversation(npc1: NPC, npc2: NPC) {
         const id = `conv_${Date.now()}`;
+
+        // B3: Shorten conversations when initiator has an active goal
+        const initiatorHasGoal = npc1.activeGoals.some(g => g.status === 'active');
         const conv: Conversation = {
             id,
             participants: [npc1, npc2],
             history: [],
             turnIndex: 0,
-            maxTurns: MAX_TURNS,
+            maxTurns: initiatorHasGoal ? 3 : MAX_TURNS,
             active: true,
         };
 
@@ -82,12 +85,24 @@ export class ConversationManager {
 
     private async runConversation(conv: Conversation) {
         const [npc1, npc2] = conv.participants;
+        let delegationExtracted = false;
+        let turnsWithoutGoalProgress = 0;
 
         for (let turn = 0; turn < conv.maxTurns && conv.active; turn++) {
             const speaker = turn % 2 === 0 ? npc1 : npc2;
             const listener = turn % 2 === 0 ? npc2 : npc1;
 
             const observation = this.buildObservation(speaker, listener);
+
+            // D1: If speaker has a high-priority goal and 2+ turns produced nothing,
+            // inject a steering note into the conversation history
+            const speakerTopGoal = speaker.activeGoals.find(g => g.status === 'active');
+            if (speakerTopGoal && speakerTopGoal.priority >= 0.5 && turnsWithoutGoalProgress >= 2) {
+                conv.history.push({
+                    speaker: 'SYSTEM',
+                    text: `[${speaker.name} remembers: active goal — "${speakerTopGoal.description}". Steer the conversation toward this objective or wrap up.]`,
+                });
+            }
 
             const t0 = performance.now();
             const result = await AgentClient.reason(
@@ -108,8 +123,16 @@ export class ConversationManager {
             const text = result.dialogue ?? '...';
 
             if (result.goalExtraction?.shouldCreateGoal && result.goalExtraction.goal) {
+                turnsWithoutGoalProgress = 0; // Reset counter — goal-relevant turn
                 const now = Date.now();
                 const extracted = result.goalExtraction.goal;
+
+                // C3: Snapshot baseline state for evaluation accuracy
+                const nearbySnapshot = observation.nearbyEntities
+                    .map(e => `- ${e.name}: at (${e.position.x}, ${e.position.y}), ${e.distance} tiles away`)
+                    .join('\n');
+                const baselineState = `Position: (${observation.position.x}, ${observation.position.y})\n${nearbySnapshot}`;
+
                 const goal = {
                     id: `goal_${speaker.id}_${now}`,
                     npcId: speaker.id,
@@ -142,6 +165,7 @@ export class ConversationManager {
                     delegatedTo: null,
                     delegatedFrom: null,
                     estimatedDifficulty: extracted.estimatedDifficulty,
+                    baselineState,
                 };
 
                 const outcome = speaker.addGoal(goal);
@@ -208,6 +232,15 @@ export class ConversationManager {
                         'in_progress',
                     );
                 }
+
+                // B3: End conversation early once delegation is extracted
+                if (extracted.delegation?.delegateToPartner || extracted.delegation?.delegatedTask) {
+                    delegationExtracted = true;
+                }
+            } else {
+                // No goal extracted this turn
+                const speakerHasGoal = speaker.activeGoals.some(g => g.status === 'active');
+                if (speakerHasGoal) turnsWithoutGoalProgress++;
             }
 
             conv.history.push({ speaker: speaker.name, text });
@@ -221,6 +254,11 @@ export class ConversationManager {
 
             // Wait for speech bubble to finish
             await this.delay(SPEECH_DURATION + PAUSE_BETWEEN);
+
+            // B3: After delegation extracted, allow one more turn for acknowledgment then end
+            if (delegationExtracted && turn >= 1) {
+                break;
+            }
         }
 
         this.endConversation(conv);

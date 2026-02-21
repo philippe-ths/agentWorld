@@ -64,6 +64,7 @@ export interface GoalEvaluation {
         progressScore: number;
         summary: string;
         shouldEscalate: boolean;
+        gapAnalysis?: string;
     };
     evaluationHistory?: number[];
 }
@@ -73,6 +74,7 @@ export interface GoalEvaluationResult {
     progressScore: number;
     summary: string;
     shouldEscalate: boolean;
+    gapAnalysis?: string;
     llmUsage?: LLMUsage;
 }
 
@@ -88,6 +90,16 @@ export interface GoalResourceProfile {
     wallClockMs: number;
     apiLatencyMs: number;
     mediumLoopTicks: number;
+    runwayUsed?: boolean;
+    productiveEscalations?: number;
+    unproductiveEscalations?: number;
+}
+
+export interface PlanStep {
+    skill: string;
+    target?: string;
+    purpose: string;
+    done: boolean;
 }
 
 export interface Goal {
@@ -106,6 +118,8 @@ export interface Goal {
     delegatedTo: string | null;
     delegatedFrom: string | null;
     estimatedDifficulty?: 'trivial' | 'simple' | 'moderate' | 'complex';
+    planAgenda?: PlanStep[];
+    baselineState?: string;
 }
 
 export interface DialogueGoalExtraction {

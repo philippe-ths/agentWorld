@@ -52,7 +52,17 @@ export function buildMediumLoopPrompt(
                 const evalText = g.evaluation.lastEvaluation
                     ? ` | progress=${g.evaluation.lastEvaluation.progressScore.toFixed(2)} (${g.evaluation.lastEvaluation.summary})`
                     : ' | progress=unknown';
-                return `  ${i + 1}. [${g.status.toUpperCase()}|p=${g.priority.toFixed(2)}] ${g.description}${evalText}`;
+                let line = `  ${i + 1}. [${g.status.toUpperCase()}|p=${g.priority.toFixed(2)}] ${g.description}${evalText}`;
+                if (g.evaluation.lastEvaluation?.gapAnalysis) {
+                    line += `\n     GAP: ${g.evaluation.lastEvaluation.gapAnalysis}`;
+                }
+                if (g.planAgenda && g.planAgenda.length > 0) {
+                    line += '\n     PLAN:';
+                    for (const step of g.planAgenda) {
+                        line += `\n       ${step.done ? '\u2705' : '\u2192'} ${step.skill}${step.target ? ` (${step.target})` : ''} \u2014 ${step.purpose}`;
+                    }
+                }
+                return line;
             })
             .join('\n')}`
         : '\nActive goals:\n  (none)';
@@ -90,33 +100,44 @@ export function buildSlowLoopPrompt(
         ? `\nRelevant memories about ${partnerName}:\n${memories.map(m => `  - ${m}`).join('\n')}`
         : '';
 
-    const activeGoalSection = observation.activeGoals.length > 0
-        ? `\nCurrent active goals:\n${observation.activeGoals
-            .map((g, i) => `  ${i + 1}. [${g.status}] ${g.description} (priority ${g.priority.toFixed(2)})`)
-            .join('\n')}`
-        : '\nCurrent active goals:\n  (none)';
+    const activeGoals = observation.activeGoals.filter(g => g.status === 'active');
+    let goalDirective = '';
+    if (activeGoals.length > 0) {
+        goalDirective = '\n── ACTIVE GOALS (use this conversation to advance them) ──';
+        for (const g of activeGoals) {
+            const evalText = g.evaluation.lastEvaluation
+                ? `Progress: ${g.evaluation.lastEvaluation.progressScore.toFixed(2)} — ${g.evaluation.lastEvaluation.summary}`
+                : 'Progress: not yet evaluated';
+            goalDirective += `\n  GOAL (priority ${g.priority.toFixed(2)}): ${g.description}`;
+            goalDirective += `\n    ${evalText}`;
+            goalDirective += `\n    Success criteria: ${g.evaluation.successCriteria}`;
+            if (g.evaluation.lastEvaluation?.gapAnalysis) {
+                goalDirective += `\n    Gap: ${g.evaluation.lastEvaluation.gapAnalysis}`;
+            }
+        }
+        goalDirective += `\n\n  INSTRUCTION: Be direct with ${partnerName} about what you need. If ${partnerName} can help with your goal, ask them to do a specific task (e.g. "go to location X" or "find entity Y"). Don't make small talk — get to the point.`;
+    }
 
     return `You are ${persona.name}. ${persona.personality}
 
 Background: ${persona.backstory}
-Goals: ${persona.goals.join('; ')}
-${memorySection}${activeGoalSection}
+Personality goals: ${persona.goals.join('; ')}
+${memorySection}${goalDirective}
 
 You are having a conversation with ${partnerName}.
 
 Conversation so far:
 ${historyText}
 
-Respond naturally as ${persona.name}. Keep your response brief (1-2 sentences). Stay in character. Be genuine and interesting. Don't repeat what was already said.
+Respond naturally as ${persona.name}. Keep your response brief (1-2 sentences). Stay in character.${activeGoals.length > 0 ? ' Your active goal takes priority — steer the conversation toward it.' : ' Be genuine and interesting.'} Don't repeat what was already said.
 
-Also decide if this conversation should create a persistent goal. A goal should be extracted only when there is a clear commitment, assignment, or intention that should influence future behavior.
-
-If one NPC asks the other to perform a subtask, include delegation metadata:
-- delegation.delegateToPartner=true when this speaker is asking the conversation partner to take on a task.
-- delegation.delegatedTask=true when this speaker is accepting a task delegated by the partner.
-- add a short delegation.rationale.
-
-If the task is ambiguous, mark needsClarification=true and provide a concise clarification question.`;
+Goal extraction rules:
+- If you are asking ${partnerName} to perform a task, set shouldCreateGoal=true with delegation.delegateToPartner=true.
+  The delegated goal must be specific and actionable (e.g. "Go to tile (14, 10)"), not vague (e.g. "help out").
+- If ${partnerName} is asking you to do something, set shouldCreateGoal=true with delegation.delegatedTask=true.
+- If there is a clear commitment or intention, set shouldCreateGoal=true.
+- Otherwise set shouldCreateGoal=false.
+- If the task is ambiguous, mark needsClarification=true and provide a concise clarification question.`;
 }
 
 export function buildReasoningPrompt(
@@ -167,9 +188,27 @@ export function buildReasoningPrompt(
         situationContext += ' Consider a different approach.';
     }
 
+    const activeGoals = observation.activeGoals.filter(g => g.status === 'active');
+    let activeGoalSection = '';
+    if (activeGoals.length > 0) {
+        activeGoalSection = '\n── ACTIVE GOALS (your plan MUST advance these) ──';
+        for (const g of activeGoals) {
+            const evalText = g.evaluation.lastEvaluation
+                ? `Progress: ${g.evaluation.lastEvaluation.progressScore.toFixed(2)} — ${g.evaluation.lastEvaluation.summary}`
+                : 'Progress: not yet evaluated';
+            activeGoalSection += `\n  GOAL (priority ${g.priority.toFixed(2)}): ${g.description}`;
+            activeGoalSection += `\n    ${evalText}`;
+            activeGoalSection += `\n    Success: ${g.evaluation.successCriteria}`;
+            activeGoalSection += `\n    Completion: ${g.evaluation.completionCondition}`;
+            if (g.evaluation.lastEvaluation?.gapAnalysis) {
+                activeGoalSection += `\n    Gap: ${g.evaluation.lastEvaluation.gapAnalysis}`;
+            }
+        }
+    }
+
     return `You are ${persona.name}. ${persona.personality}
 
-Your goals: ${persona.goals.join('; ')}
+Personality goals: ${persona.goals.join('; ')}
 Background: ${persona.backstory}
 
 Current situation:
@@ -177,14 +216,15 @@ Current situation:
 - Currently doing: ${observation.currentSkill ?? 'nothing'}
 - Nearby entities:
 ${nearbyList}
-${memorySection}${eventsSection}${beliefSection}${situationContext}${knowledgeSummary ? '\nKnowledge graph:\n' + knowledgeSummary : ''}
+${activeGoalSection}${memorySection}${eventsSection}${beliefSection}${situationContext}${knowledgeSummary ? '\nKnowledge graph:\n' + knowledgeSummary : ''}
 
-Think deeply about your situation. What should you do next? Consider:
-1. Your personality and goals
-2. What you've learned from recent events and memories
-3. Whether to move somewhere specific, talk to someone, or wait
+Produce a concrete, goal-directed plan. Each action must advance an active goal. Do NOT produce abstract reflections or poetic monologues.
 
-Provide a concrete plan of actions, any new beliefs about the world, or something to say aloud.`;
+Prioritize:
+1. Active goals above all else
+2. If someone nearby can help, plan to converse and delegate
+3. If you need to find someone, move toward their last known position
+4. Only fall back to personality goals if no active goals exist`;
 }
 
 export function buildReflectionPrompt(
@@ -247,9 +287,36 @@ export function buildGoalEvaluationPrompt(
     observation: Observation,
     goal: Goal,
 ): string {
-    const nearbyList = observation.nearbyEntities.length > 0
-        ? observation.nearbyEntities.map(e => `${e.name} (${e.distance} tiles)`).join(', ')
-        : 'nobody nearby';
+    // Build structured entity list with positions
+    const allEntities: Array<{ name: string; x: number; y: number }> = [
+        { name: `${persona.name} (you)`, x: observation.position.x, y: observation.position.y },
+        ...observation.nearbyEntities.map(e => ({ name: e.name, x: e.position.x, y: e.position.y })),
+    ];
+
+    const entitySection = allEntities.length > 1
+        ? 'ENTITIES:\n' + allEntities.map(e => `- ${e.name}: at (${e.x}, ${e.y})`).join('\n')
+        : 'ENTITIES:\n- (nobody nearby)';
+
+    // Compute pairwise distances between all entities
+    let pairwiseSection = '';
+    if (allEntities.length > 1) {
+        const pairs: string[] = [];
+        for (let i = 0; i < allEntities.length; i++) {
+            for (let j = i + 1; j < allEntities.length; j++) {
+                const a = allEntities[i];
+                const b = allEntities[j];
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
+                pairs.push(`- ${a.name} ↔ ${b.name}: ${dist} tile${dist !== 1 ? 's' : ''}`);
+            }
+        }
+        pairwiseSection = '\n\nPAIRWISE DISTANCES:\n' + pairs.join('\n');
+    }
+
+    const baselineSection = goal.baselineState
+        ? `\nBASELINE (when goal was created):\n${goal.baselineState}\n\nScore only genuine progress since goal creation — do not credit pre-existing conditions.`
+        : '';
 
     return `You are ${persona.name}. Evaluate progress on your active goal.
 
@@ -258,16 +325,19 @@ SUCCESS CRITERIA: ${goal.evaluation.successCriteria}
 PROGRESS SIGNAL: ${goal.evaluation.progressSignal}
 FAILURE SIGNAL: ${goal.evaluation.failureSignal}
 COMPLETION CONDITION: ${goal.evaluation.completionCondition}
-
+${baselineSection}
 CURRENT STATE:
-- Position: (${observation.position.x}, ${observation.position.y})
 - Current skill: ${observation.currentSkill ?? 'none'}
-- Nearby: ${nearbyList}
 - Recent events:
 ${observation.recentEvents.length > 0 ? observation.recentEvents.map(e => `  - ${e}`).join('\n') : '  - none'}
+
+${entitySection}${pairwiseSection}
+
+Use the exact positions and pairwise distances above to verify each sub-condition of the success criteria. If the criteria reference proximity (e.g. "within N tiles"), check the pairwise distances directly — do not estimate.
 
 Return an evaluation with:
 - progress_score (0.0-1.0)
 - summary (one sentence)
-- should_escalate (true if goal needs deep reasoning help)`;
+- should_escalate (true if goal needs deep reasoning help)
+- gap_analysis: list what remains to be done. For each sub-condition, state whether it is met or not. Include specific entity names, positions, and the next concrete step.`;
 }

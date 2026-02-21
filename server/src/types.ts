@@ -174,7 +174,6 @@ export interface NPCPersona {
     name: string;
     personality: string;
     goals: string[];
-    backstory: string;
 }
 
 // ── Conversation ─────────────────────────────────────────

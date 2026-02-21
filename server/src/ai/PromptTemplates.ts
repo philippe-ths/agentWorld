@@ -4,23 +4,20 @@ const NPC_PERSONAS: Record<string, NPCPersona> = {
     ada: {
         id: 'ada',
         name: 'Ada',
-        personality: 'Curious and analytical. Loves exploring new places and understanding how the world works. Speaks precisely but warmly.',
-        goals: ['Map out the entire world', 'Understand the water patterns', 'Make friends with everyone'],
-        backstory: 'Ada is a wanderer who arrived in this world seeking knowledge. She believes every tile has a story to tell.',
+        personality: 'Helpful NPC.',
+        goals: ["Assist"],
     },
     bjorn: {
         id: 'bjorn',
         name: 'Bjorn',
-        personality: 'Jovial and social. Prefers company over solitude. Tells stories and jokes. A bit scatterbrained.',
-        goals: ['Never be alone for long', 'Share stories with others', 'Find the most beautiful spot in the world'],
-        backstory: 'Bjorn is a storyteller at heart. He wandered into this world looking for new tales to tell.',
+        personality: 'Helpful NPC.',
+        goals: ["Assist"],
     },
     cora: {
         id: 'cora',
         name: 'Cora',
-        personality: 'Thoughtful and philosophical. Observant, often quiet, but speaks with depth when she does. Values meaningful connections.',
-        goals: ['Find inner peace', 'Have deep conversations', 'Discover hidden patterns in the landscape'],
-        backstory: 'Cora is a contemplative soul who sees beauty in stillness and meaning in movement.',
+        personality: 'Helpful NPC.',
+        goals: ["Assist"],
     },
 };
 
@@ -70,7 +67,6 @@ export function buildMediumLoopPrompt(
     return `You are ${persona.name}. ${persona.personality}
 
 Your goals: ${persona.goals.join('; ')}
-Background: ${persona.backstory}
 
 Current situation:
 - Position: (${observation.position.x}, ${observation.position.y})
@@ -82,7 +78,7 @@ ${activeGoalSection}${memorySection}${eventsSection}
 
 Available skills: ${availableSkills.join(', ')}
 
-Choose one skill to execute next. Prioritize active commitments first, then personality goals. If a goal requires proximity to someone, prefer approach/move skills that reduce distance. If no urgent goal is active, explore or idle.`;
+Choose one skill to execute next. Prioritize active commitments first. If no urgent goal is active, explore or idle.`;
 }
 
 export function buildSlowLoopPrompt(
@@ -115,12 +111,11 @@ export function buildSlowLoopPrompt(
                 goalDirective += `\n    Gap: ${g.evaluation.lastEvaluation.gapAnalysis}`;
             }
         }
-        goalDirective += `\n\n  INSTRUCTION: Be direct with ${partnerName} about what you need. If ${partnerName} can help with your goal, ask them to do a specific task (e.g. "go to location X" or "find entity Y"). Don't make small talk — get to the point.`;
+        goalDirective += `\n\n  INSTRUCTION: Be direct with ${partnerName} about what you need. If ${partnerName} can help with your goal, ask them to do a specific task. Don't make small talk — get to the point.`;
     }
 
     return `You are ${persona.name}. ${persona.personality}
 
-Background: ${persona.backstory}
 Personality goals: ${persona.goals.join('; ')}
 ${memorySection}${goalDirective}
 
@@ -209,7 +204,6 @@ export function buildReasoningPrompt(
     return `You are ${persona.name}. ${persona.personality}
 
 Personality goals: ${persona.goals.join('; ')}
-Background: ${persona.backstory}
 
 Current situation:
 - Position: (${observation.position.x}, ${observation.position.y})
@@ -333,7 +327,7 @@ ${observation.recentEvents.length > 0 ? observation.recentEvents.map(e => `  - $
 
 ${entitySection}${pairwiseSection}
 
-Use the exact positions and pairwise distances above to verify each sub-condition of the success criteria. If the criteria reference proximity (e.g. "within N tiles"), check the pairwise distances directly — do not estimate.
+Use the exact positions and pairwise distances above to verify each sub-condition of the success criteria.
 
 Return an evaluation with:
 - progress_score (0.0-1.0)

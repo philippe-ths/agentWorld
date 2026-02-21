@@ -22,7 +22,6 @@ vi.mock('../ai/PromptTemplates.js', () => ({
         name: 'TestNpc',
         personality: 'Curious',
         goals: ['Explore'],
-        backstory: 'A test character.',
     })),
 }));
 

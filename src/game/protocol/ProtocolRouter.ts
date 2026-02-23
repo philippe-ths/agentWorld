@@ -18,6 +18,8 @@ export class ProtocolRouter {
 
   // Handlers registered by NPCs or the protocol engine
   private messageHandlers: ((msg: ProtocolMessage) => void)[] = [];
+  // Named handlers for targeted routing (npc name → handler)
+  private namedHandlers: Map<string, (msg: ProtocolMessage) => void> = new Map();
 
   constructor(world: WorldQuery) {
     this.world = world;
@@ -27,8 +29,11 @@ export class ProtocolRouter {
     this.npcs.set(name.toLowerCase(), npc);
   }
 
-  onMessage(handler: (msg: ProtocolMessage) => void) {
+  onMessage(handler: (msg: ProtocolMessage) => void, npcName?: string) {
     this.messageHandlers.push(handler);
+    if (npcName) {
+      this.namedHandlers.set(npcName.toLowerCase(), handler);
+    }
   }
 
   /** Send a protocol message. Routes to appropriate handler. */
@@ -67,9 +72,23 @@ export class ProtocolRouter {
     // Log for debugging
     logEvent(message.from, 'protocol', `[${message.type}] ${this.summarizeMessage(message)}`);
 
-    // Notify all handlers
-    for (const handler of this.messageHandlers) {
-      handler(message);
+    // Targeted routing: if message has a 'to' field, deliver only to that handler
+    const target = 'to' in message ? (message as { to?: string }).to : undefined;
+    if (target) {
+      const handler = this.namedHandlers.get(target.toLowerCase());
+      if (handler) {
+        handler(message);
+      }
+      // Also deliver to sender (for self-tracking)
+      const senderHandler = this.namedHandlers.get(message.from.toLowerCase());
+      if (senderHandler && senderHandler !== handler) {
+        senderHandler(message);
+      }
+    } else {
+      // Broadcast to all handlers
+      for (const handler of this.messageHandlers) {
+        handler(message);
+      }
     }
   }
 

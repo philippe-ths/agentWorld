@@ -48,8 +48,15 @@ Decompose this into concrete sub-tasks. For each sub-task, specify:
    - {"type": "flee_from", "threat": "EntityName", "safeDistance": N}
    - {"type": "speak", "text": "..."}
    - {"type": "say_to", "target": "EntityName", "text": "..."}
-   - {"type": "converse_with", "target": "EntityName"}
+   - {"type": "converse_with", "target": "EntityName", "purpose": "why you need to talk to them"}
    - {"type": "wait", "duration": milliseconds}
+
+Action selection rules:
+- Use "say_to" for one-way message delivery, announcements, greetings, or relaying messages. It is lightweight (no LLM dialogue calls).
+- Use "converse_with" ONLY when a two-way exchange is required — negotiation, asking questions that need answers, or gathering information. It triggers a multi-turn dialogue and is expensive.
+- When using "converse_with", the "purpose" MUST include ALL relevant context — exact message content, specific names, goals, what was previously said. The conversation partner will ONLY see this purpose field, not the original task description.
+- Prefer the simplest action that accomplishes the goal. Do NOT add verification sub-tasks for simple deliveries — if you used "say_to" the message was delivered.
+
 4. Dependencies on other sub-tasks (by ID)
 
 Respond in this exact JSON format:
@@ -95,7 +102,7 @@ export function buildDialoguePrompt(
     : '\nThis is the start of the conversation.';
 
   const purposeBlock = purpose
-    ? `\nYou have a specific purpose for this conversation: ${purpose}`
+    ? `\nIMPORTANT — You have a specific purpose for this conversation: ${purpose}\nYou MUST steer the conversation toward this purpose. Do not get sidetracked with small talk. Accomplish your purpose within the first 1-2 turns.`
     : '';
 
   return `You are ${persona.name}, an NPC in a tile-based isometric world. ${persona.personality}
@@ -108,6 +115,7 @@ ${historyBlock}
 
 Respond as ${persona.name}. Keep your response natural and in-character.
 Keep it concise — 1-2 sentences unless the situation calls for more.
+Only reference facts from the world summary, your memories, or this conversation history. Do NOT invent messages, events, or details that have not been established.
 
 Respond in this exact JSON format:
 {

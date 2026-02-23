@@ -17,6 +17,7 @@ export class NPC extends Entity {
     behaviorMachine!: BehaviorMachine;
     protocolAgent?: ProtocolAgent;
     private agentLoop?: AgentLoop;
+    private completionCheckAccum = 0;
 
     constructor(
         scene: Scene,
@@ -63,6 +64,13 @@ export class NPC extends Entity {
     update(time: number, delta: number) {
         this.agentLoop?.update(time, delta);
         this.behaviorMachine?.update(time, delta);
+
+        // Periodically check mechanical completion conditions (~500ms)
+        this.completionCheckAccum += delta;
+        if (this.completionCheckAccum >= 500) {
+            this.completionCheckAccum = 0;
+            this.protocolAgent?.checkCompletions();
+        }
     }
 
     addEvent(event: string) {

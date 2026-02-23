@@ -1,7 +1,6 @@
 import type { NPC } from '../entities/NPC';
 import type { EntityManager } from '../entities/EntityManager';
-import * as AgentClient from './AgentClient';
-import type { Observation, NearbyEntity } from './types';
+import { dialogue as apiDialogue } from './AgentClient';
 import { log as logEvent } from '../ui/EventLog';
 
 interface Conversation {
@@ -11,6 +10,7 @@ interface Conversation {
     turnIndex: number;
     maxTurns: number;
     active: boolean;
+    purpose?: string;
 }
 
 const MAX_TURNS = 5;
@@ -26,12 +26,12 @@ export class ConversationManager {
         this.entityManager = entityManager;
 
         window.addEventListener('npc-wants-converse', ((e: CustomEvent) => {
-            const { npcId, targetName } = e.detail;
-            this.tryStartConversation(npcId, targetName);
+            const { npcId, targetName, purpose } = e.detail;
+            this.tryStartConversation(npcId, targetName, purpose);
         }) as EventListener);
     }
 
-    private tryStartConversation(initiatorId: string, targetName: string) {
+    private tryStartConversation(initiatorId: string, targetName: string, purpose?: string) {
         if (this.busyNpcs.has(initiatorId)) return;
 
         const entities = this.entityManager.getAll();
@@ -44,10 +44,10 @@ export class ConversationManager {
         const targetNpc = target as NPC;
         if (this.busyNpcs.has(targetNpc.id)) return;
 
-        this.startConversation(initiator, targetNpc);
+        this.startConversation(initiator, targetNpc, purpose);
     }
 
-    private async startConversation(npc1: NPC, npc2: NPC) {
+    private async startConversation(npc1: NPC, npc2: NPC, purpose?: string) {
         const id = `conv_${Date.now()}`;
 
         const conv: Conversation = {
@@ -57,6 +57,7 @@ export class ConversationManager {
             turnIndex: 0,
             maxTurns: MAX_TURNS,
             active: true,
+            purpose,
         };
 
         this.conversations.set(id, conv);
@@ -85,14 +86,15 @@ export class ConversationManager {
             const speaker = turn % 2 === 0 ? npc1 : npc2;
             const listener = turn % 2 === 0 ? npc2 : npc1;
 
-            const observation = this.buildObservation(speaker, listener);
+            const worldSummary = speaker.protocolAgent?.getWorldSummary() ?? '';
 
             const t0 = performance.now();
-            const result = await AgentClient.reason(
+            const result = await apiDialogue(
                 speaker.id,
-                observation,
-                conv.history,
                 listener.name,
+                worldSummary,
+                conv.history,
+                conv.purpose,
             );
             const latency = Math.round(performance.now() - t0);
 
@@ -100,7 +102,7 @@ export class ConversationManager {
 
             logEvent(speaker.name, 'llm-call',
                 `dialogue generation — ${latency}ms`,
-                { npcId: speaker.id, relatedNpcId: listener.id, metadata: { model: 'claude-sonnet-4', latency } },
+                { npcId: speaker.id, relatedNpcId: listener.id, metadata: { model: 'claude-haiku', latency } },
             );
 
             const text = result.dialogue ?? '...';
@@ -112,6 +114,13 @@ export class ConversationManager {
             speaker.say(text, SPEECH_DURATION);
             speaker.addEvent(`said to ${listener.name}: "${text}"`);
             listener.addEvent(`${speaker.name} said: "${text}"`);
+
+            // If the speaker's dialogue requests a task from the listener, delegate it
+            if (result.taskRequested && listener.protocolAgent) {
+                listener.addEvent(`received task from ${speaker.name}: "${result.taskRequested}"`);
+                listener.protocolAgent.receiveTask(result.taskRequested, speaker.name)
+                    .catch(err => console.warn('[ConversationManager] Task delegation failed:', err));
+            }
 
             await this.delay(SPEECH_DURATION + PAUSE_BETWEEN);
         }
@@ -140,25 +149,6 @@ export class ConversationManager {
             { npcId: npc2.id, relatedNpcId: npc1.id });
 
         this.conversations.delete(conv.id);
-    }
-
-    private buildObservation(speaker: NPC, listener: NPC): Observation {
-        const nearby: NearbyEntity[] = [{
-            id: listener.id,
-            name: listener.name,
-            position: { ...listener.tilePos },
-            distance: 1,
-        }];
-
-        return {
-            npcId: speaker.id,
-            name: speaker.name,
-            position: { ...speaker.tilePos },
-            nearbyEntities: nearby,
-            isInConversation: true,
-            currentSkill: 'converse',
-            recentEvents: [...speaker.recentEvents],
-        };
     }
 
     private delay(ms: number): Promise<void> {

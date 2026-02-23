@@ -11,6 +11,7 @@ import { ProtocolAgent } from '../protocol/ProtocolAgent';
 import { ChatController } from '../ui/ChatController';
 import { ControlBar } from '../ui/ControlBar';
 import { LogPanel } from '../ui/LogPanel';
+import { connectServerLogStream } from '../ui/ServerLogBridge';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -41,6 +42,7 @@ export class GameScene extends Scene {
         new ChatController(this, this.player, this.entityManager);
         new ControlBar(this.entityManager);
         new LogPanel(this.entityManager);
+        connectServerLogStream();
         this.setupCamera();
     }
 

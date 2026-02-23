@@ -55,6 +55,8 @@ export class BehaviorMachine {
   onBecomeIdle?: () => void;
   // Callback when an action completes
   onActionComplete?: (action: Action, success: boolean) => void;
+  // Incidental observations collected during movement
+  observations: string[] = [];
 
   constructor(npc: NPC, world: WorldQuery, entityManager: EntityManager) {
     this.npc = npc;
@@ -160,11 +162,25 @@ export class BehaviorMachine {
       }
 
       case 'travel_to': {
-        const path = findPath(
+        let path = findPath(
           this.npc.tilePos,
           action.destination,
           this.entityManager.isWalkable
         );
+        // If destination is occupied/unwalkable, try adjacent tiles
+        if (path.length === 0) {
+          const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+          for (const d of dirs) {
+            const ax = action.destination.x + d.x;
+            const ay = action.destination.y + d.y;
+            if (this.entityManager.isWalkable(ax, ay)) {
+              const altPath = findPath(this.npc.tilePos, { x: ax, y: ay }, this.entityManager.isWalkable);
+              if (altPath.length > 0 && (path.length === 0 || altPath.length < path.length)) {
+                path = altPath;
+              }
+            }
+          }
+        }
         if (path.length === 0) {
           logEvent(this.npc.name, 'action', `travel_to (${action.destination.x},${action.destination.y}) — no path`, { npcId: this.npc.id });
           this.completeCurrentAction(false);
@@ -267,6 +283,9 @@ export class BehaviorMachine {
   private updateTravel() {
     if (this.npc.isMoving) return;
 
+    // Collect observations about nearby entities during movement
+    this.collectMovementObservations();
+
     if (this.pathIndex >= this.currentPath.length) {
       this.completeCurrentAction(true);
       return;
@@ -324,6 +343,9 @@ export class BehaviorMachine {
     }
 
     if (this.npc.isMoving) return;
+
+    // Collect observations during pursuit
+    this.collectMovementObservations();
 
     // Re-path periodically
     this.repathTimer += delta;
@@ -502,12 +524,12 @@ export class BehaviorMachine {
   private goIdle() {
     // If we just finished a pursuit for a converse_with, dispatch the event
     if (this.pendingConverse) {
-      const { target } = this.pendingConverse;
+      const { target, purpose } = this.pendingConverse;
       this.pendingConverse = null;
       this.state = 'conversing';
       // currentAction stays as the converse_with so conversationEnded() can complete it
       window.dispatchEvent(new CustomEvent('npc-wants-converse', {
-        detail: { npcId: this.npc.id, targetName: target },
+        detail: { npcId: this.npc.id, targetName: target, purpose },
       }));
       return;
     }
@@ -519,7 +541,8 @@ export class BehaviorMachine {
     this.onBecomeIdle?.();
   }
 
-  private clearCurrent() {
+  /** Reset all state — cancel any current activity. */
+  clearCurrent() {
     this.state = 'idle';
     this.currentAction = null;
     this.currentPath = [];
@@ -530,6 +553,21 @@ export class BehaviorMachine {
     this.waitTimer = 0;
     this.repathTimer = 0;
     this.conditionCheckTimer = 0;
+    this.observations = [];
+  }
+
+  /** Collect observations about entities encountered during movement. */
+  private collectMovementObservations() {
+    const nearby = this.entityManager.getEntitiesNear(
+      this.npc.tilePos.x, this.npc.tilePos.y, 3,
+    );
+    for (const entity of nearby) {
+      if (entity === this.npc) continue;
+      const note = `Noticed ${entity.name} at (${entity.tilePos.x},${entity.tilePos.y})`;
+      if (!this.observations.includes(note)) {
+        this.observations.push(note);
+      }
+    }
   }
 
   /** External signal that conversation has ended (from ConversationManager). */

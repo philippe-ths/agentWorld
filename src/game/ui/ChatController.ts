@@ -3,7 +3,7 @@ import type { Player } from '../entities/Player';
 import type { NPC } from '../entities/NPC';
 import type { EntityManager } from '../entities/EntityManager';
 import { log as logEvent } from './EventLog';
-import { dialogue as apiDialogue } from '../ai/AgentClient';
+import { dialogue as apiDialogue, fetchRelevantMemories } from '../ai/AgentClient';
 
 const MAX_TURNS = 5;
 const SPEECH_DURATION = 4000;
@@ -19,6 +19,7 @@ export class ChatController {
     private history: { speaker: string; text: string }[] = [];
     private turnCount = 0;
     private waitingForReply = false;
+    private pendingTask: string | null = null;
 
     constructor(scene: Scene, player: Player, entityManager: EntityManager) {
         this.scene = scene;
@@ -100,9 +101,13 @@ export class ChatController {
 
         this.activeNpc = npc;
         this.activeNpc.isInConversation = true;
-        this.activeNpc.setPlan([]);
+        // Don't wipe behavior if NPC has active protocol tasks
+        if (!npc.protocolAgent || !npc.protocolAgent.hasActiveTasks()) {
+            this.activeNpc.setPlan([]);
+        }
         this.history = [];
         this.turnCount = 0;
+        this.pendingTask = null;
         this.show();
     }
 
@@ -125,12 +130,15 @@ export class ChatController {
 
         try {
             const worldSummary = this.activeNpc.protocolAgent?.getWorldSummary() ?? '';
+            const memories = await fetchRelevantMemories(this.activeNpc.id, text);
 
             const response = await apiDialogue(
                 this.activeNpc.id,
                 'Player',
                 worldSummary,
                 this.history,
+                undefined,
+                memories,
             );
 
             const reply = response.dialogue || '...';
@@ -138,12 +146,10 @@ export class ChatController {
             this.history.push({ speaker: this.activeNpc.name, text: reply });
             logEvent(this.activeNpc.name, 'conversation', `→ Player: ${reply}`);
 
-            // If the LLM detected a task in the message, delegate it
+            // If the LLM detected a task, defer it until conversation ends
             if (response.taskRequested && this.activeNpc.protocolAgent) {
                 this.activeNpc.addEvent(`received task from Player: "${response.taskRequested}"`);
-                // Don't await — let task planning happen in background after conversation
-                this.activeNpc.protocolAgent.receiveTask(response.taskRequested, 'Player')
-                    .catch(err => console.warn('[ChatController] Task delegation failed:', err));
+                this.pendingTask = response.taskRequested;
             }
         } catch {
             this.activeNpc.say('...', 2000);
@@ -158,13 +164,24 @@ export class ChatController {
     }
 
     private endConversation() {
-        if (this.activeNpc) {
-            this.activeNpc.isInConversation = false;
-            this.activeNpc = null;
+        const npc = this.activeNpc;
+        const task = this.pendingTask;
+
+        if (npc) {
+            npc.isInConversation = false;
         }
+
+        this.activeNpc = null;
         this.history = [];
         this.turnCount = 0;
         this.waitingForReply = false;
+        this.pendingTask = null;
         this.hide();
+
+        // Dispatch pending task after conversation state is fully cleaned up
+        if (task && npc?.protocolAgent) {
+            npc.protocolAgent.receiveTask(task, 'Player')
+                .catch(err => console.warn('[ChatController] Task delegation failed:', err));
+        }
     }
 }

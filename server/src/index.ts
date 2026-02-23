@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import type { Response } from 'express';
 import cors from 'cors';
 import { generateDialogue, generateReasoning } from './ai/SlowLoop.js';
 import {
@@ -12,9 +13,12 @@ import {
 import { enqueue, Priority, getQueueDepth } from './ai/ApiQueue.js';
 import { addObservation, initBuffer } from './memory/ShortTermBuffer.js';
 import { selfCritique } from './memory/Reflection.js';
-import { updateBeliefs } from './memory/LongTermMemory.js';
-import { upsertEntity, upsertRelation } from './memory/KnowledgeGraph.js';
+import { addMemory, getRelevantMemories, updateBeliefs, decayMemories } from './memory/LongTermMemory.js';
+import { upsertEntity, upsertRelation, summarizeKnowledge } from './memory/KnowledgeGraph.js';
+import { reflect } from './memory/Reflection.js';
 import type { Observation, ReasoningRequest } from './types.js';
+import { serverLog } from './ServerLogger.js';
+import type { ServerLogEntry } from './ServerLogger.js';
 
 export const app = express();
 const PORT = 3001;
@@ -102,6 +106,28 @@ app.post('/api/npc/reason', async (req, res) => {
     res.json(result);
 });
 
+// ── SSE log stream ──────────────────────────────────────
+
+const sseClients: Set<Response> = new Set();
+
+app.get('/api/logs/stream', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+    });
+    res.write('data: {"type":"connected"}\n\n');
+    sseClients.add(res);
+    req.on('close', () => { sseClients.delete(res); });
+});
+
+serverLog.on('entry', (entry: ServerLogEntry) => {
+    const data = JSON.stringify(entry);
+    for (const client of sseClients) {
+        client.write(`data: ${data}\n\n`);
+    }
+});
+
 // ── Health check ─────────────────────────────────────────
 
 app.get('/api/health', (_req, res) => {
@@ -177,17 +203,23 @@ app.post('/api/protocol/propose', async (req, res) => {
     }
 
     try {
+        serverLog.info('propose', `${npcId}: "${taskDescription}"`);
         const prompt = buildProposePrompt(
             npcId, worldSummary, taskDescription, capabilities ?? '', memories ?? [],
         );
 
+        const t0 = Date.now();
         const response = await enqueue(Priority.REASONING, {
             model: 'claude-sonnet-4-20250514',
             max_tokens: 1024,
             messages: [{ role: 'user', content: prompt }],
         });
+        const duration = Date.now() - t0;
+        const usage = response.usage;
 
         const parsed = parseJsonResponse(extractJsonText(response)) as Record<string, unknown>;
+        const subCount = Array.isArray(parsed.subTasks) ? parsed.subTasks.length : 0;
+        serverLog.info('propose', `${npcId}: ${subCount} sub-tasks, interpretation: "${String(parsed.interpretation ?? '').slice(0, 80)}"`, { model: 'claude-sonnet-4-20250514', durationMs: duration, tokensIn: usage?.input_tokens, tokensOut: usage?.output_tokens });
 
         res.json({
             type: 'propose',
@@ -197,7 +229,7 @@ app.post('/api/protocol/propose', async (req, res) => {
             ...parsed,
         });
     } catch (err) {
-        console.error('[Protocol/propose] Error:', err);
+        serverLog.error('propose', `${npcId}: LLM call failed — ${err instanceof Error ? err.message : String(err)}`);
         res.status(500).json({ error: 'LLM call failed' });
     }
 });
@@ -219,17 +251,22 @@ app.post('/api/protocol/dialogue', async (req, res) => {
     }
 
     try {
+        serverLog.info('dialogue', `${npcId} → ${partner}${purpose ? ` (purpose: ${purpose})` : ''}`);
         const prompt = buildDialoguePrompt(
             npcId, worldSummary, partner, history ?? [], purpose, memories ?? [],
         );
 
+        const t0 = Date.now();
         const response = await enqueue(Priority.DIALOGUE, {
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-haiku-4-5-20251001',
             max_tokens: 256,
             messages: [{ role: 'user', content: prompt }],
         });
+        const duration = Date.now() - t0;
+        const usage = response.usage;
 
         const parsed = parseJsonResponse(extractJsonText(response)) as Record<string, unknown>;
+        serverLog.info('dialogue', `${npcId} → ${partner}: "${String(parsed.dialogue ?? '').slice(0, 80)}"`, { model: 'claude-haiku-4-5-20251001', durationMs: duration, tokensIn: usage?.input_tokens, tokensOut: usage?.output_tokens });
 
         res.json({
             dialogue: parsed.dialogue ?? '...',
@@ -237,7 +274,7 @@ app.post('/api/protocol/dialogue', async (req, res) => {
             taskRequested: parsed.taskRequested ?? null,
         });
     } catch (err) {
-        console.error('[Protocol/dialogue] Error:', err);
+        serverLog.error('dialogue', `${npcId} → ${partner}: LLM failed — ${err instanceof Error ? err.message : String(err)}`);
         res.status(500).json({ error: 'LLM call failed' });
     }
 });
@@ -263,19 +300,25 @@ app.post('/api/protocol/evaluate-proposal', async (req, res) => {
     }
 
     try {
+        serverLog.info('evaluate', `${npcId}: evaluating proposal for "${proposal.taskDescription.slice(0, 60)}"`);
         const prompt = buildQuestionPrompt(npcId, proposal, worldSummary, memories ?? []);
 
+        const t0 = Date.now();
         const response = await enqueue(Priority.REASONING, {
             model: 'claude-sonnet-4-20250514',
             max_tokens: 512,
             messages: [{ role: 'user', content: prompt }],
         });
+        const duration = Date.now() - t0;
+        const usage = response.usage;
 
         const parsed = parseJsonResponse(extractJsonText(response)) as Record<string, unknown>;
 
         if (parsed.approved === true) {
+            serverLog.info('evaluate', `${npcId}: proposal approved`, { durationMs: duration, tokensIn: usage?.input_tokens, tokensOut: usage?.output_tokens });
             res.json({ approved: true });
         } else {
+            serverLog.info('evaluate', `${npcId}: concern raised — ${String(parsed.concern ?? '').slice(0, 80)}`, { durationMs: duration, tokensIn: usage?.input_tokens, tokensOut: usage?.output_tokens });
             res.json({
                 type: 'question',
                 id: `q_${Date.now()}`,
@@ -288,7 +331,7 @@ app.post('/api/protocol/evaluate-proposal', async (req, res) => {
             });
         }
     } catch (err) {
-        console.error('[Protocol/evaluate-proposal] Error:', err);
+        serverLog.error('evaluate', `${npcId}: LLM failed — ${err instanceof Error ? err.message : String(err)}`);
         res.status(500).json({ error: 'LLM call failed' });
     }
 });
@@ -318,15 +361,20 @@ app.post('/api/protocol/revise', async (req, res) => {
     }
 
     try {
+        serverLog.info('revise', `${npcId}: revising for concern "${question.concern.slice(0, 60)}"`);
         const prompt = buildRevisePrompt(npcId, originalProposal, question, worldSummary);
 
+        const t0 = Date.now();
         const response = await enqueue(Priority.REASONING, {
             model: 'claude-sonnet-4-20250514',
-            max_tokens: 1024,
+            max_tokens: 4096,
             messages: [{ role: 'user', content: prompt }],
         });
+        const duration = Date.now() - t0;
+        const usage = response.usage;
 
         const parsed = parseJsonResponse(extractJsonText(response)) as Record<string, unknown>;
+        serverLog.info('revise', `${npcId}: revised — "${String(parsed.whatChanged ?? parsed.explanation ?? '').slice(0, 80)}"`, { durationMs: duration, tokensIn: usage?.input_tokens, tokensOut: usage?.output_tokens });
 
         res.json({
             type: 'revise',
@@ -338,7 +386,7 @@ app.post('/api/protocol/revise', async (req, res) => {
             tier: 'strategic',
         });
     } catch (err) {
-        console.error('[Protocol/revise] Error:', err);
+        serverLog.error('revise', `${npcId}: LLM failed — ${err instanceof Error ? err.message : String(err)}`);
         res.status(500).json({ error: 'LLM call failed' });
     }
 });
@@ -357,15 +405,20 @@ app.post('/api/protocol/remember', async (req, res) => {
     }
 
     try {
+        serverLog.info('remember', `${npcId}: distilling lessons from "${taskContext.slice(0, 60)}"`);
         const prompt = buildRememberPrompt(npcId, taskContext, outcome);
 
+        const t0 = Date.now();
         const response = await enqueue(Priority.BACKGROUND, {
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 256,
             messages: [{ role: 'user', content: prompt }],
         });
+        const duration = Date.now() - t0;
+        const usage = response.usage;
 
         const parsed = parseJsonResponse(extractJsonText(response)) as { lessons?: unknown[] };
+        serverLog.info('remember', `${npcId}: ${parsed.lessons?.length ?? 0} lessons distilled`, { durationMs: duration, tokensIn: usage?.input_tokens, tokensOut: usage?.output_tokens });
 
         res.json({
             type: 'remember',
@@ -374,8 +427,72 @@ app.post('/api/protocol/remember', async (req, res) => {
             lessons: parsed.lessons ?? [],
         });
     } catch (err) {
-        console.error('[Protocol/remember] Error:', err);
+        serverLog.error('remember', `${npcId}: LLM failed — ${err instanceof Error ? err.message : String(err)}`);
         res.status(500).json({ error: 'LLM call failed' });
+    }
+});
+
+// ── Memory endpoints ────────────────────────────────────
+
+// Retrieve relevant memories + knowledge for a task/query
+app.post('/api/memory/relevant', async (req, res) => {
+    const { npcId, query } = req.body as { npcId: string; query: string };
+
+    if (!npcId || !query) {
+        res.status(400).json({ error: 'Missing npcId or query' });
+        return;
+    }
+
+    try {
+        const observation: Observation = {
+            npcId,
+            name: npcId,
+            position: { x: 0, y: 0 },
+            nearbyEntities: [],
+            isInConversation: false,
+            currentSkill: null,
+            recentEvents: [query],
+        };
+
+        const [memories, knowledge] = await Promise.all([
+            getRelevantMemories(npcId, observation),
+            summarizeKnowledge(npcId),
+        ]);
+
+        const combined: string[] = [...memories];
+        if (knowledge.length > 0) {
+            combined.push(knowledge);
+        }
+
+        serverLog.info('memory', `${npcId}: retrieved ${combined.length} relevant memories for "${query.slice(0, 60)}"`);
+        res.json({ memories: combined });
+    } catch (err) {
+        serverLog.error('memory', `${npcId}: retrieval failed — ${err instanceof Error ? err.message : String(err)}`);
+        res.json({ memories: [] });
+    }
+});
+
+// Store a lesson/memory from task completion
+app.post('/api/memory/store', async (req, res) => {
+    const { npcId, text, type, importance } = req.body as {
+        npcId: string;
+        text: string;
+        type?: string;
+        importance?: number;
+    };
+
+    if (!npcId || !text) {
+        res.status(400).json({ error: 'Missing npcId or text' });
+        return;
+    }
+
+    try {
+        await addMemory(npcId, text, (type ?? 'lesson') as 'lesson', importance ?? 0.7);
+        serverLog.info('memory', `${npcId}: stored ${type ?? 'lesson'} (importance: ${importance ?? 0.7})`);
+        res.json({ status: 'stored' });
+    } catch (err) {
+        serverLog.error('memory', `${npcId}: store failed — ${err instanceof Error ? err.message : String(err)}`);
+        res.status(500).json({ error: 'Failed to store memory' });
     }
 });
 
@@ -385,6 +502,19 @@ const NPC_IDS = ['ada', 'bjorn', 'cora'];
 
 async function start() {
     await Promise.all(NPC_IDS.map(id => initBuffer(id)));
+
+    // Periodic memory maintenance: reflection + decay every 60s
+    setInterval(async () => {
+        for (const npcId of NPC_IDS) {
+            try {
+                await reflect(npcId);
+                await decayMemories(npcId);
+                serverLog.info('maintenance', `${npcId}: reflection + decay complete`);
+            } catch (err) {
+                serverLog.warn('maintenance', `${npcId}: failed — ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+    }, 60_000);
 
     app.listen(PORT, () => {
         console.log(`[AgentWorld Server] Running on http://localhost:${PORT}`);

@@ -247,3 +247,36 @@ export async function remember(
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as RememberResponse;
 }
+
+// ── Memory endpoints ──────────────────────────────────
+
+export async function fetchRelevantMemories(
+    npcId: string,
+    query: string,
+): Promise<string[]> {
+    try {
+        const res = await fetch(`${BASE_URL}/api/memory/relevant`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ npcId, query }),
+        });
+        if (!res.ok) return [];
+        const data = (await res.json()) as { memories: string[] };
+        return data.memories ?? [];
+    } catch {
+        return [];
+    }
+}
+
+export async function storeMemory(
+    npcId: string,
+    text: string,
+    type: string = 'lesson',
+    importance: number = 0.7,
+): Promise<void> {
+    fetch(`${BASE_URL}/api/memory/store`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ npcId, text, type, importance }),
+    }).catch(() => {});
+}

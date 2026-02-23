@@ -48,6 +48,13 @@ export interface SkillSelection {
     escalate?: boolean;
     reasoning?: string;
     llmUsage?: LLMUsage;
+    goalEvaluation?: {
+        timestamp: number;
+        progressScore: number;
+        summary: string;
+        shouldEscalate: boolean;
+        gapAnalysis?: string;
+    };
 }
 
 export interface ReasoningResult {

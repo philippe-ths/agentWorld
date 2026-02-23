@@ -1,10 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { Observation, ReasoningResult, ConversationTurn, Goal, GoalEvaluationResult } from '../types.js';
 import { getPersona, buildSlowLoopPrompt, buildReasoningPrompt, buildGoalEvaluationPrompt } from './PromptTemplates.js';
 import { getRelevantMemories, loadBeliefs } from '../memory/LongTermMemory.js';
 import { summarizeKnowledge } from '../memory/KnowledgeGraph.js';
-
-const client = new Anthropic({ maxRetries: 3 });
+import { enqueue, Priority } from './ApiQueue.js';
 
 function estimateSonnetCostUSD(inputTokens: number, outputTokens: number): number {
     const inCostPerM = 3.0;
@@ -81,7 +80,7 @@ export async function generateDialogue(
     const prompt = buildSlowLoopPrompt(persona, observation, conversationHistory, partnerName, memories);
 
     try {
-        const response = await client.messages.create({
+        const response = await enqueue(Priority.DIALOGUE, {
             model: 'claude-sonnet-4-20250514',
             max_tokens: 350,
             tools: [DIALOGUE_TOOL],
@@ -230,7 +229,7 @@ export async function generateReasoning(
     const prompt = buildReasoningPrompt(persona, observation, memories, beliefs, context, kgSummary);
 
     try {
-        const response = await client.messages.create({
+        const response = await enqueue(Priority.REASONING, {
             model: 'claude-sonnet-4-20250514',
             max_tokens: 400,
             tools: [REASONING_TOOL],
@@ -294,7 +293,7 @@ export async function evaluateGoalProgress(
     const prompt = buildGoalEvaluationPrompt(persona, observation, goal);
 
     try {
-        const response = await client.messages.create({
+        const response = await enqueue(Priority.EVALUATION, {
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 250,
             tools: [GOAL_EVAL_TOOL],

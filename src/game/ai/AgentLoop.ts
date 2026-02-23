@@ -147,94 +147,6 @@ export class AgentLoop {
                 },
             );
 
-            // Periodic goal evaluation (every 3rd medium-loop tick)
-            const activeGoal = this.npc.activeGoals.find(g => g.status === 'active');
-            if (activeGoal && this.tickCounter % 3 === 0) {
-                const tEval = performance.now();
-                const evalResult = await AgentClient.evaluateGoal(this.npc.id, observation, activeGoal);
-                const evalLatency = Math.round(performance.now() - tEval);
-
-                activeGoal.evaluation.lastEvaluation = {
-                    timestamp: evalResult.timestamp,
-                    progressScore: evalResult.progressScore,
-                    summary: evalResult.summary,
-                    shouldEscalate: evalResult.shouldEscalate,
-                    gapAnalysis: evalResult.gapAnalysis,
-                };
-                activeGoal.resources.evaluationCalls++;
-                activeGoal.resources.apiLatencyMs += evalLatency;
-                this.applyUsage(activeGoal, evalResult.llmUsage, 'haiku');
-                activeGoal.evaluation.evaluationHistory = [
-                    ...(activeGoal.evaluation.evaluationHistory ?? []),
-                    evalResult.progressScore,
-                ].slice(-8);
-
-                logEvent(this.npc.name, 'thought',
-                    `goal check: ${activeGoal.description} -> ${evalResult.summary} (score ${evalResult.progressScore.toFixed(2)})`,
-                    { npcId: this.npc.id, metadata: { goalId: activeGoal.id, progress: evalResult.progressScore } },
-                );
-
-                if (evalResult.progressScore >= 0.95) {
-                    this.finalizeGoal(activeGoal, 'completed');
-                    this.npc.addEvent(`completed goal: ${activeGoal.description}`);
-                }
-
-                const diminishingReturns = this.isDiminishingReturns(activeGoal);
-                if ((evalResult.shouldEscalate || diminishingReturns) && activeGoal.status === 'active') {
-                    const budget = this.getEscalationBudget(activeGoal);
-                    const unproductive = activeGoal.resources.unproductiveEscalations ?? 0;
-                    if (unproductive >= budget) {
-                        // C1: Upgrade difficulty if score is improving
-                        if (this.isScoreImproving(activeGoal) && this.upgradeDifficulty(activeGoal)) {
-                            logEvent(this.npc.name, 'system',
-                                `goal difficulty upgraded to ${activeGoal.estimatedDifficulty}, budget extended`,
-                                { npcId: this.npc.id, metadata: { goalId: activeGoal.id } },
-                            );
-                        // C2: Completion runway — grant one extra call if progress ≥ 0.5 and improving
-                        } else if (
-                            evalResult.progressScore >= 0.5 &&
-                            this.isScoreImproving(activeGoal) &&
-                            !activeGoal.resources.runwayUsed
-                        ) {
-                            activeGoal.resources.runwayUsed = true;
-                            logEvent(this.npc.name, 'system',
-                                `goal runway granted (progress ${evalResult.progressScore.toFixed(2)}, improving)`,
-                                { npcId: this.npc.id, metadata: { goalId: activeGoal.id } },
-                            );
-                        } else {
-                            this.finalizeGoal(activeGoal, 'abandoned');
-                            this.npc.addEvent(`abandoned goal (budget exhausted): ${activeGoal.description}`);
-                            logEvent(this.npc.name, 'system',
-                                `goal abandoned after ${unproductive} unproductive escalations (budget ${budget})`,
-                                { npcId: this.npc.id, metadata: { goalId: activeGoal.id, budget } },
-                            );
-                            return;
-                        }
-                    }
-
-                    this.npc.addEvent(`goal needs escalation: ${activeGoal.description}`);
-
-                    const t0 = performance.now();
-                    const reasonResult = await AgentClient.reasonGeneral(
-                        this.npc.id,
-                        observation,
-                        { failedSkill: this.npc.currentSkill ?? undefined },
-                    );
-                    const latency = Math.round(performance.now() - t0);
-
-                    activeGoal.resources.apiLatencyMs += latency;
-                    this.applyUsage(activeGoal, reasonResult.llmUsage, 'sonnet');
-
-                    logEvent(this.npc.name, 'llm-call',
-                        `slow loop (goal escalation) — ${latency}ms`,
-                        { npcId: this.npc.id, metadata: { model: 'claude-sonnet-4', latency, goalId: activeGoal.id } },
-                    );
-
-                    this.handleReasoningResult(reasonResult, activeGoal);
-                    return;
-                }
-            }
-
             // Escalate to slow loop if repeatedly stuck
             if (this.shouldEscalateToReasoning()) {
                 const stuckCount = this.npc.recentEvents.filter(e => e.includes('stuck')).length;
@@ -291,6 +203,87 @@ export class AgentLoop {
                     `medium loop (tick) — ${latency}ms`,
                     { npcId: this.npc.id, metadata: { model: 'claude-haiku-4.5', latency } },
                 );
+
+                // Process inline goal evaluation from combined tick+eval response
+                if (result.goalEvaluation && activeGoalForCost && activeGoalForCost.status === 'active') {
+                    const evalResult = result.goalEvaluation;
+
+                    activeGoalForCost.evaluation.lastEvaluation = {
+                        timestamp: evalResult.timestamp,
+                        progressScore: evalResult.progressScore,
+                        summary: evalResult.summary,
+                        shouldEscalate: evalResult.shouldEscalate,
+                        gapAnalysis: evalResult.gapAnalysis,
+                    };
+                    activeGoalForCost.resources.evaluationCalls++;
+                    activeGoalForCost.evaluation.evaluationHistory = [
+                        ...(activeGoalForCost.evaluation.evaluationHistory ?? []),
+                        evalResult.progressScore,
+                    ].slice(-8);
+
+                    logEvent(this.npc.name, 'thought',
+                        `goal check: ${activeGoalForCost.description} -> ${evalResult.summary} (score ${evalResult.progressScore.toFixed(2)})`,
+                        { npcId: this.npc.id, metadata: { goalId: activeGoalForCost.id, progress: evalResult.progressScore } },
+                    );
+
+                    if (evalResult.progressScore >= 0.95) {
+                        this.finalizeGoal(activeGoalForCost, 'completed');
+                        this.npc.addEvent(`completed goal: ${activeGoalForCost.description}`);
+                    }
+
+                    const diminishingReturns = this.isDiminishingReturns(activeGoalForCost);
+                    if ((evalResult.shouldEscalate || diminishingReturns) && activeGoalForCost.status === 'active') {
+                        const budget = this.getEscalationBudget(activeGoalForCost);
+                        const unproductive = activeGoalForCost.resources.unproductiveEscalations ?? 0;
+                        if (unproductive >= budget) {
+                            if (this.isScoreImproving(activeGoalForCost) && this.upgradeDifficulty(activeGoalForCost)) {
+                                logEvent(this.npc.name, 'system',
+                                    `goal difficulty upgraded to ${activeGoalForCost.estimatedDifficulty}, budget extended`,
+                                    { npcId: this.npc.id, metadata: { goalId: activeGoalForCost.id } },
+                                );
+                            } else if (
+                                evalResult.progressScore >= 0.5 &&
+                                this.isScoreImproving(activeGoalForCost) &&
+                                !activeGoalForCost.resources.runwayUsed
+                            ) {
+                                activeGoalForCost.resources.runwayUsed = true;
+                                logEvent(this.npc.name, 'system',
+                                    `goal runway granted (progress ${evalResult.progressScore.toFixed(2)}, improving)`,
+                                    { npcId: this.npc.id, metadata: { goalId: activeGoalForCost.id } },
+                                );
+                            } else {
+                                this.finalizeGoal(activeGoalForCost, 'abandoned');
+                                this.npc.addEvent(`abandoned goal (budget exhausted): ${activeGoalForCost.description}`);
+                                logEvent(this.npc.name, 'system',
+                                    `goal abandoned after ${unproductive} unproductive escalations (budget ${budget})`,
+                                    { npcId: this.npc.id, metadata: { goalId: activeGoalForCost.id, budget } },
+                                );
+                                return;
+                            }
+                        }
+
+                        this.npc.addEvent(`goal needs escalation: ${activeGoalForCost.description}`);
+
+                        const tEsc = performance.now();
+                        const reasonResult = await AgentClient.reasonGeneral(
+                            this.npc.id,
+                            observation,
+                            { failedSkill: this.npc.currentSkill ?? undefined },
+                        );
+                        const escLatency = Math.round(performance.now() - tEsc);
+
+                        activeGoalForCost.resources.apiLatencyMs += escLatency;
+                        this.applyUsage(activeGoalForCost, reasonResult.llmUsage, 'sonnet');
+
+                        logEvent(this.npc.name, 'llm-call',
+                            `slow loop (goal escalation) — ${escLatency}ms`,
+                            { npcId: this.npc.id, metadata: { model: 'claude-sonnet-4', latency: escLatency, goalId: activeGoalForCost.id } },
+                        );
+
+                        this.handleReasoningResult(reasonResult, activeGoalForCost);
+                        return;
+                    }
+                }
 
                 if (result.reasoning) {
                     logEvent(this.npc.name, 'thought', result.reasoning, { npcId: this.npc.id });

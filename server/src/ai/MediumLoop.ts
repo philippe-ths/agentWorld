@@ -1,10 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-import type { Observation, SkillSelection } from '../types.js';
+import type Anthropic from '@anthropic-ai/sdk';
+import type { Observation, SkillSelection, Goal } from '../types.js';
 import { getPersona, buildMediumLoopPrompt } from './PromptTemplates.js';
 import { getMatchingSkills, getAllSkillNames } from '../skills/SkillLibrary.js';
 import { getRelevantMemories } from '../memory/LongTermMemory.js';
-
-const client = new Anthropic({ maxRetries: 3 });
+import { enqueue, Priority } from './ApiQueue.js';
 
 function estimateHaikuCostUSD(inputTokens: number, outputTokens: number): number {
     // Approximate list pricing per 1M tokens (kept lightweight for simulation economics).
@@ -18,7 +17,8 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
     const skills = getMatchingSkills(observation);
     const memories = await getRelevantMemories(observation.npcId, observation);
 
-    const prompt = buildMediumLoopPrompt(persona, observation, skills, memories);
+    const activeGoal = observation.activeGoals.find((g: Goal) => g.status === 'active');
+    const prompt = buildMediumLoopPrompt(persona, observation, skills, memories, activeGoal);
 
     // Build tool schema dynamically so new skills are included
     const skillNames = getAllSkillNames();
@@ -47,15 +47,27 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
                     type: 'string',
                     description: 'Brief explanation of why this skill was chosen',
                 },
+                goal_evaluation: {
+                    type: 'object',
+                    description: 'If you have an active goal, evaluate your current progress',
+                    properties: {
+                        progress_score: { type: 'number', description: '0.0 to 1.0 progress toward completion' },
+                        summary: { type: 'string', description: 'One sentence summary of current progress' },
+                        should_escalate: { type: 'boolean', description: 'True if goal needs deeper reasoning intervention' },
+                        gap_analysis: { type: 'string', description: 'What remains to be done' },
+                    },
+                    required: ['progress_score', 'summary', 'should_escalate', 'gap_analysis'],
+                },
             },
             required: ['skill', 'params', 'reasoning'],
         },
     };
 
     try {
-        const response = await client.messages.create({
+        const priority = activeGoal ? Priority.TICK_GOAL : Priority.TICK_IDLE;
+        const response = await enqueue(priority, {
             model: 'claude-haiku-4-5-20251001',
-            max_tokens: 256,
+            max_tokens: 350,
             tools: [skillTool],
             tool_choice: { type: 'tool', name: 'select_skill' },
             messages: [{ role: 'user', content: prompt }],
@@ -63,7 +75,17 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
 
         const toolBlock = response.content.find(b => b.type === 'tool_use');
         if (toolBlock && toolBlock.type === 'tool_use') {
-            const input = toolBlock.input as { skill: string; params: Record<string, unknown>; reasoning?: string };
+            const input = toolBlock.input as {
+                skill: string;
+                params: Record<string, unknown>;
+                reasoning?: string;
+                goal_evaluation?: {
+                    progress_score: number;
+                    summary: string;
+                    should_escalate: boolean;
+                    gap_analysis?: string;
+                };
+            };
 
             const inputTokens = response.usage?.input_tokens ?? 0;
             const outputTokens = response.usage?.output_tokens ?? 0;
@@ -71,7 +93,7 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
             // If converse is selected, escalate to slow loop for dialogue
             const escalate = input.skill === 'converse';
 
-            return {
+            const result: SkillSelection = {
                 skill: input.skill,
                 params: input.params ?? {},
                 escalate,
@@ -83,6 +105,19 @@ export async function mediumLoopTick(observation: Observation): Promise<SkillSel
                     estimatedCostUSD: estimateHaikuCostUSD(inputTokens, outputTokens),
                 },
             };
+
+            // Extract inline goal evaluation if present
+            if (input.goal_evaluation) {
+                result.goalEvaluation = {
+                    timestamp: Date.now(),
+                    progressScore: Math.max(0, Math.min(1, input.goal_evaluation.progress_score)),
+                    summary: input.goal_evaluation.summary,
+                    shouldEscalate: input.goal_evaluation.should_escalate,
+                    gapAnalysis: input.goal_evaluation.gap_analysis,
+                };
+            }
+
+            return result;
         }
     } catch (err) {
         console.error('[MediumLoop] Error:', err);

@@ -1,11 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getAll, clear } from './ShortTermBuffer.js';
 import { addMemory } from './LongTermMemory.js';
 import { addRule } from './KnowledgeGraph.js';
 import { buildReflectionPrompt, buildSelfCritiquePrompt, getPersona } from '../ai/PromptTemplates.js';
 import { recordOutcome } from '../skills/SkillLibrary.js';
-
-const client = new Anthropic({ maxRetries: 3 });
+import { enqueue, Priority } from '../ai/ApiQueue.js';
 
 export async function reflect(
     npcId: string,
@@ -27,7 +25,7 @@ export async function reflect(
     });
 
     try {
-        const response = await client.messages.create({
+        const response = await enqueue(Priority.BACKGROUND, {
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],
@@ -74,7 +72,7 @@ export async function selfCritique(
     }
 
     try {
-        const response = await client.messages.create({
+        const response = await enqueue(Priority.BACKGROUND, {
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],

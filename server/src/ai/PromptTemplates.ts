@@ -25,11 +25,35 @@ export function getPersona(npcId: string): NPCPersona {
     return NPC_PERSONAS[npcId] ?? NPC_PERSONAS['ada'];
 }
 
+export function buildWorldPreamble(): string {
+    return `WORLD: You are in a 64×64 tile grid world. Tiles are grass (walkable) or water (blocked).
+There are exactly 4 entities: Player, Ada, Bjorn, and Cora.
+
+YOUR CAPABILITIES:
+- You can move one tile at a time along walkable paths
+- You can speak, but only entities within ~2 tiles can see your speech bubble
+- You can only interact with entities listed in NEARBY ENTITIES
+- You cannot communicate with distant entities — you must physically travel to them
+- Movement takes real time: roughly 1 tile per second along a path
+
+SKILLS:
+- wander: move to a random nearby tile (for exploration)
+- move_to(x, y): pathfind to a specific coordinate
+- approach_entity(name): walk toward a nearby entity (must be in NEARBY ENTITIES)
+- converse(name): start a conversation (entity must be within 3 tiles)
+- idle: wait in place
+
+IMPORTANT: If an entity is not in your NEARBY ENTITIES list, you don't know where they are. You must either recall their last known position from memory, ask someone who might know, or explore to find them.
+
+`;
+}
+
 export function buildMediumLoopPrompt(
     persona: NPCPersona,
     observation: Observation,
     availableSkills: string[],
     memories: string[],
+    activeGoal?: Goal,
 ): string {
     const nearbyList = observation.nearbyEntities.length > 0
         ? observation.nearbyEntities.map(e => `  - ${e.name} at (${e.position.x},${e.position.y}), distance ${e.distance}`).join('\n')
@@ -64,7 +88,7 @@ export function buildMediumLoopPrompt(
             .join('\n')}`
         : '\nActive goals:\n  (none)';
 
-    return `You are ${persona.name}. ${persona.personality}
+    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
 
 Your goals: ${persona.goals.join('; ')}
 
@@ -78,7 +102,43 @@ ${activeGoalSection}${memorySection}${eventsSection}
 
 Available skills: ${availableSkills.join(', ')}
 
-Choose one skill to execute next. Prioritize active commitments first. If no urgent goal is active, explore or idle.`;
+Choose one skill to execute next. Prioritize active commitments first. If no urgent goal is active, explore or idle.${activeGoal ? buildEvaluationRubric(persona, observation, activeGoal) : ''}`;
+}
+
+function buildEvaluationRubric(persona: NPCPersona, observation: Observation, goal: Goal): string {
+    const allEntities: Array<{ name: string; x: number; y: number }> = [
+        { name: `${persona.name} (you)`, x: observation.position.x, y: observation.position.y },
+        ...observation.nearbyEntities.map(e => ({ name: e.name, x: e.position.x, y: e.position.y })),
+    ];
+
+    let pairwiseSection = '';
+    if (allEntities.length > 1) {
+        const pairs: string[] = [];
+        for (let i = 0; i < allEntities.length; i++) {
+            for (let j = i + 1; j < allEntities.length; j++) {
+                const a = allEntities[i];
+                const b = allEntities[j];
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
+                pairs.push(`  - ${a.name} ↔ ${b.name}: ${dist} tile${dist !== 1 ? 's' : ''}`);
+            }
+        }
+        pairwiseSection = `\nPairwise distances:\n${pairs.join('\n')}`;
+    }
+
+    const baselineSection = goal.baselineState
+        ? `\nBaseline (when goal was created): ${goal.baselineState}\nScore only genuine progress since goal creation.`
+        : '';
+
+    return `\n\n── GOAL EVALUATION ──
+Also evaluate your current progress on your active goal in the goal_evaluation field.
+GOAL: "${goal.description}"
+SUCCESS CRITERIA: ${goal.evaluation.successCriteria}
+PROGRESS SIGNAL: ${goal.evaluation.progressSignal}
+FAILURE SIGNAL: ${goal.evaluation.failureSignal}
+COMPLETION CONDITION: ${goal.evaluation.completionCondition}${baselineSection}${pairwiseSection}
+Return progress_score (0.0-1.0), summary (one sentence), should_escalate (true if goal needs deeper reasoning), and gap_analysis (what remains to be done).`;
 }
 
 export function buildSlowLoopPrompt(
@@ -114,7 +174,7 @@ export function buildSlowLoopPrompt(
         goalDirective += `\n\n  INSTRUCTION: Be direct with ${partnerName} about what you need. If ${partnerName} can help with your goal, ask them to do a specific task. Don't make small talk — get to the point.`;
     }
 
-    return `You are ${persona.name}. ${persona.personality}
+    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
 
 Personality goals: ${persona.goals.join('; ')}
 ${memorySection}${goalDirective}
@@ -201,7 +261,7 @@ export function buildReasoningPrompt(
         }
     }
 
-    return `You are ${persona.name}. ${persona.personality}
+    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
 
 Personality goals: ${persona.goals.join('; ')}
 
@@ -233,7 +293,7 @@ export function buildReflectionPrompt(
         ? `\nRecent goal outcomes:\n${context.recentOutcomes.map(o => `- ${o}`).join('\n')}`
         : '';
 
-    return `Review these recent observations and distill them into 1-3 key insights. Focus on patterns, relationships, and useful knowledge.
+    return `${buildWorldPreamble()}Review these recent observations and distill them into 1-3 key insights. Focus on patterns, relationships, and useful knowledge.
 
 Observations:
 ${events.map(e => `- ${e}`).join('\n')}
@@ -254,7 +314,7 @@ export function buildSelfCritiquePrompt(
         resourceCost?: string;
     },
 ): string {
-    return `You are ${persona.name}. ${persona.personality}
+    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
 
 You recently experienced failures while trying to act in the world:
 ${failureEvents.map(e => `- ${e}`).join('\n')}
@@ -312,7 +372,7 @@ export function buildGoalEvaluationPrompt(
         ? `\nBASELINE (when goal was created):\n${goal.baselineState}\n\nScore only genuine progress since goal creation — do not credit pre-existing conditions.`
         : '';
 
-    return `You are ${persona.name}. Evaluate progress on your active goal.
+    return `${buildWorldPreamble()}You are ${persona.name}. Evaluate progress on your active goal.
 
 GOAL: "${goal.description}"
 SUCCESS CRITERIA: ${goal.evaluation.successCriteria}

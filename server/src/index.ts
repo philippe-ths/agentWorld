@@ -15,6 +15,7 @@ import {
     syncGoalComputeTotals,
     getAggregateResourceStats,
 } from './goals/ResourceLedger.js';
+import { getQueueDepth } from './ai/ApiQueue.js';
 
 export const app = express();
 const PORT = 3001;
@@ -155,7 +156,7 @@ app.post('/api/npc/reason', async (req, res) => {
 // ── Health check ─────────────────────────────────────────
 
 app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', queueDepth: getQueueDepth() });
 });
 
 app.get('/api/stats/resources', (_req, res) => {

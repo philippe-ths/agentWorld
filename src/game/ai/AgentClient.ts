@@ -178,11 +178,12 @@ export async function dialogue(
     history?: { speaker: string; text: string }[],
     purpose?: string,
     memories?: string[],
+    role?: 'initiator' | 'responder',
 ): Promise<DialogueResponse> {
     const res = await fetch(`${BASE_URL}/api/protocol/dialogue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, partner, worldSummary, history, purpose, memories }),
+        body: JSON.stringify({ npcId, partner, worldSummary, history, purpose, memories, role }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as DialogueResponse;

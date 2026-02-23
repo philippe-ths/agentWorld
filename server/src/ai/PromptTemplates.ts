@@ -56,6 +56,7 @@ Action selection rules:
 - Use "converse_with" ONLY when a two-way exchange is required — negotiation, asking questions that need answers, or gathering information. It triggers a multi-turn dialogue and is expensive.
 - When using "converse_with", the "purpose" MUST include ALL relevant context — exact message content, specific names, goals, what was previously said. The conversation partner will ONLY see this purpose field, not the original task description.
 - Prefer the simplest action that accomplishes the goal. Do NOT add verification sub-tasks for simple deliveries — if you used "say_to" the message was delivered.
+- When a sub-task targets the Player or another entity that may move, use "pursue" with the entity name, NOT "travel_to" with fixed coordinates. "travel_to" is for static map locations only. Entities move — coordinates go stale.
 
 4. Dependencies on other sub-tasks (by ID)
 
@@ -91,6 +92,7 @@ export function buildDialoguePrompt(
   history: { speaker: string; text: string }[],
   purpose: string | undefined,
   memories: string[],
+  role?: 'initiator' | 'responder',
 ): string {
   const persona = getPersona(npcName.toLowerCase());
   const memoryBlock = memories.length > 0
@@ -102,7 +104,7 @@ export function buildDialoguePrompt(
     : '\nThis is the start of the conversation.';
 
   const purposeBlock = purpose
-    ? `\nIMPORTANT — You have a specific purpose for this conversation: ${purpose}\nYou MUST steer the conversation toward this purpose. Do not get sidetracked with small talk. Accomplish your purpose within the first 1-2 turns.`
+    ? `\nIMPORTANT — You have a specific purpose for this conversation: ${purpose}\nYou MUST steer the conversation toward this purpose. Do not get sidetracked with small talk. Accomplish your purpose within the first 1-2 turns.\nIf this purpose involves delivering or confirming a message, discuss ONLY the exact content described in the purpose. Do NOT invent message details, supply routes, coordinates, or other events not established in the conversation history.`
     : '';
 
   return `You are ${persona.name}, an NPC in a tile-based isometric world. ${persona.personality}
@@ -124,7 +126,7 @@ Respond in this exact JSON format:
   "taskRequested": "a brief description of what you've been asked to DO, or null if this is just conversation"
 }
 
-Set "taskRequested" to a short task description ONLY if the speaker is asking you to perform an action, go somewhere, find something, deliver a message, etc. Regular greetings, questions, or chitchat should have "taskRequested": null.
+Set "taskRequested" to a short task description ONLY if the speaker is asking you to perform an action, go somewhere, find something, deliver a message, etc. Regular greetings, questions, or chitchat should have "taskRequested": null.${role === 'responder' ? '\n\nCRITICAL: You are the RESPONDER in this conversation — someone is making a request OF you. Do NOT set "taskRequested". You are acknowledging or answering, not receiving a new task. Always set "taskRequested": null.' : ''}
 
 Respond ONLY with the JSON object, no other text.`;
 }

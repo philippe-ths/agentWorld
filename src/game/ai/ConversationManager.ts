@@ -89,12 +89,21 @@ export class ConversationManager {
             const worldSummary = speaker.protocolAgent?.getWorldSummary() ?? '';
 
             const t0 = performance.now();
+            // In purpose-driven conversations, the initiator is the delegator;
+            // the responder should not generate taskRequested
+            const isInitiator = speaker === npc1;
+            const role = conv.purpose
+                ? (isInitiator ? 'initiator' : 'responder')
+                : undefined;
+
             const result = await apiDialogue(
                 speaker.id,
                 listener.name,
                 worldSummary,
                 conv.history,
                 conv.purpose,
+                undefined,
+                role,
             );
             const latency = Math.round(performance.now() - t0);
 
@@ -115,8 +124,11 @@ export class ConversationManager {
             speaker.addEvent(`said to ${listener.name}: "${text}"`);
             listener.addEvent(`${speaker.name} said: "${text}"`);
 
-            // If the speaker's dialogue requests a task from the listener, delegate it
-            if (result.taskRequested && listener.protocolAgent) {
+            // If the speaker's dialogue requests a task from the listener, delegate it.
+            // In purpose-driven conversations, only the initiator can delegate — the
+            // responder's acknowledgement must NOT spin up a mirror protocol cycle.
+            const canDelegate = !conv.purpose || speaker === npc1;
+            if (result.taskRequested && listener.protocolAgent && canDelegate) {
                 listener.addEvent(`received task from ${speaker.name}: "${result.taskRequested}"`);
                 listener.protocolAgent.receiveTask(result.taskRequested, speaker.name)
                     .catch(err => console.warn('[ConversationManager] Task delegation failed:', err));

@@ -236,13 +236,14 @@ app.post('/api/protocol/propose', async (req, res) => {
 
 // Generate dialogue for a conversation turn
 app.post('/api/protocol/dialogue', async (req, res) => {
-    const { npcId, partner, history, purpose, worldSummary, memories } = req.body as {
+    const { npcId, partner, history, purpose, worldSummary, memories, role } = req.body as {
         npcId: string;
         partner: string;
         history?: { speaker: string; text: string }[];
         purpose?: string;
         worldSummary: string;
         memories?: string[];
+        role?: 'initiator' | 'responder';
     };
 
     if (!npcId || !partner || !worldSummary) {
@@ -253,7 +254,7 @@ app.post('/api/protocol/dialogue', async (req, res) => {
     try {
         serverLog.info('dialogue', `${npcId} → ${partner}${purpose ? ` (purpose: ${purpose})` : ''}`);
         const prompt = buildDialoguePrompt(
-            npcId, worldSummary, partner, history ?? [], purpose, memories ?? [],
+            npcId, worldSummary, partner, history ?? [], purpose, memories ?? [], role,
         );
 
         const t0 = Date.now();

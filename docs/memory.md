@@ -13,7 +13,7 @@ Cleared after each reflection cycle.
 
 `LongTermMemory.ts` — vector-indexed memory store.
 
-- **Storage**: each memory has text, type (`observation | insight | lesson`), importance (0–1), timestamp, access count, and an embedding vector.
+- **Storage**: each memory has text, type (`fact | insight | lesson`), importance (0–1), timestamp, access count, and an embedding vector.
 - **Retrieval**: queries are embedded with `all-MiniLM-L6-v2`; memories are scored by cosine similarity + recency (48 h half-life) + access frequency.
 - **Decay**: runs every 10 ticks. Importance decays 5–8 % per cycle. `lesson`-type memories decay 50 % slower. Memories below 0.05 importance are pruned.
 - **Concurrency**: per-NPC write locks prevent read-modify-write races.

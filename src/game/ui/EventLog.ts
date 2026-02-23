@@ -5,7 +5,8 @@ export type LogType =
     | 'thought'
     | 'llm-call'
     | 'awareness'
-    | 'skill-selection';
+    | 'skill-selection'
+    | 'protocol';
 
 export interface LogEntry {
     timestamp: number;

@@ -4,7 +4,10 @@ import { TILE_W, TILE_H } from '../entities/Entity';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
+import { WorldQuery } from '../world/WorldQuery';
 import { ConversationManager } from '../ai/ConversationManager';
+import { ProtocolRouter } from '../protocol/ProtocolRouter';
+import { ProtocolAgent } from '../protocol/ProtocolAgent';
 import { ChatController } from '../ui/ChatController';
 import { ControlBar } from '../ui/ControlBar';
 import { LogPanel } from '../ui/LogPanel';
@@ -15,6 +18,8 @@ export class GameScene extends Scene {
     map!: Phaser.Tilemaps.Tilemap;
     private groundLayer!: Phaser.Tilemaps.TilemapLayer;
     entityManager!: EntityManager;
+    worldQuery!: WorldQuery;
+    protocolRouter!: ProtocolRouter;
     private player!: Player;
 
     constructor() {
@@ -26,6 +31,8 @@ export class GameScene extends Scene {
         this.createAnimations();
 
         this.entityManager = new EntityManager();
+        this.worldQuery = new WorldQuery(this.entityManager);
+        this.protocolRouter = new ProtocolRouter(this.worldQuery);
         this.player = new Player(this, this.map, { x: 5, y: 5 }, this.entityManager.isWalkable);
         this.entityManager.add(this.player);
 
@@ -138,6 +145,9 @@ export class GameScene extends Scene {
                 this.entityManager.isWalkable, def.name, def.tint,
             );
             npc.initAgentLoop(this.entityManager);
+            npc.initBehaviorMachine(this.worldQuery, this.entityManager);
+            npc.protocolAgent = new ProtocolAgent(npc, this.worldQuery, npc.behaviorMachine, this.protocolRouter);
+            this.protocolRouter.registerNPC(def.name, npc);
             this.entityManager.add(npc);
         }
     }

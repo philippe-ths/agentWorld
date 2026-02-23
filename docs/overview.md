@@ -1,6 +1,6 @@
 # AgentWorld — Overview
 
-An isometric Phaser 3 game where AI-driven NPCs act autonomously using a **three-loop architecture** powered by Claude LLMs.
+An isometric Phaser 3 game where AI-driven NPCs collaborate autonomously using a **protocol-based collective reasoning** system powered by Claude LLMs.
 
 ## Tech Stack
 
@@ -10,31 +10,86 @@ An isometric Phaser 3 game where AI-driven NPCs act autonomously using a **three
 | Server | Express, TypeScript (tsx) |
 | AI | Anthropic Claude (Haiku + Sonnet) |
 | Embeddings | @xenova/transformers (all-MiniLM-L6-v2, local) |
-| Tests | Vitest (72 tests) |
+| Tests | Vitest |
 
-## Three-Loop Architecture
+## Architecture
 
 ```
-┌──────────────┐   every frame   ┌──────────────┐   every 15s   ┌───────────────────┐
-│  Fast Loop   │ ◄────────────── │ Medium Loop  │ ◄──────────── │  Slow Loop        │
-│  (client)    │  execute plan   │  (Haiku)     │   escalate    │  (Sonnet)         │
-│  move/wait   │                 │  pick skill  │               │reason/plan/talk   │
-└──────────────┘                 └──────────────┘               └───────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Client (Phaser 3)                        │
+│                                                                 │
+│  ┌─────────────┐   ┌─────────────────┐   ┌──────────────────┐  │
+│  │ WorldQuery   │   │ BehaviorMachine │   │ ProtocolRouter   │  │
+│  │ Capabilities │   │ ConditionChecker│   │ ProtocolAgent    │  │
+│  └─────────────┘   └─────────────────┘   └──────────────────┘  │
+│        ▲ world state      ▲ actions            ▲ messages       │
+│        │                  │                    │                 │
+│  ┌─────┴──────────────────┴────────────────────┴──────────────┐ │
+│  │                     NPC / Entity                           │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                            │ HTTP                               │
+└────────────────────────────┼────────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Server (Express)                           │
+│                                                                 │
+│  ┌──────────────┐   ┌──────────────┐   ┌───────────────────┐   │
+│  │ ApiQueue     │   │ Prompt       │   │ Memory            │   │
+│  │ (rate limit) │   │ Templates    │   │ (STB, LTM, KG,    │   │
+│  └──────┬───────┘   └──────────────┘   │  Reflection,      │   │
+│         │                              │  Embeddings)       │   │
+│         ▼                              └───────────────────┘   │
+│  ┌──────────────┐                                               │
+│  │ Claude API   │                                               │
+│  │ Sonnet/Haiku │                                               │
+│  └──────────────┘                                               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-- **Fast loop** — runs every frame on the client; executes move/wait/speak actions from the current plan.
-- **Medium loop** — fires every 15 s (staggered per NPC); calls Haiku to select the next skill.
-- **Slow loop** — invoked on escalation (conversation or stuck recovery); calls Sonnet for dialogue, deep reasoning, or structured planning.
+## Intelligence Tiers
+
+Every operation runs at the cheapest tier capable of handling it:
+
+| Tier | Model | Purpose | Cost |
+|------|-------|---------|------|
+| **Strategic** | Sonnet | Ambiguity, novelty, judgment — decomposing problems, debating plans, revising on failure | High |
+| **Tactical** | Haiku | Well-scoped tasks — dialogue, simple decisions, summarisation | Low |
+| **Mechanical** | None (code) | Deterministic — movement, pathfinding, condition checks, timer management | Free |
+
+Each tier's job is to reduce complexity so the tier below it can operate.
+
+## Protocol System
+
+NPCs coordinate using 7 protocol primitives (see [protocol-primitives.md](protocol-primitives.md)):
+
+**Propose** → **Accept** → **Attempt** → **Report** (with **Question**, **Revise**, and **Remember** as needed)
+
+- No central coordinator — leadership is emergent
+- Any NPC can propose, question, or revise at any time
+- Tasks are decomposed with mechanical completion criteria where possible
+- Context is curated per-invocation, not accumulated
 
 ## Project Layout
 
 ```
 agentWorld/
-├── src/game/          # Phaser client (entities, scenes, AI client, UI)
-├── server/src/        # Express API (AI loops, memory, skills)
-├── public/            # Static assets & CSS
-├── docs/              # You are here
-└── vite/              # Vite configs (dev & prod)
+├── src/game/              # Phaser client
+│   ├── entities/          #   Entity, NPC, Player, EntityManager
+│   ├── scenes/            #   Boot, Preloader, GameScene
+│   ├── ai/                #   BehaviorMachine, ConditionChecker, AgentClient,
+│   │                      #   AgentLoop, ConversationManager, Pathfinding
+│   ├── protocol/          #   ProtocolRouter, ProtocolAgent, types
+│   ├── world/             #   WorldQuery, Capabilities
+│   └── ui/                #   ChatController, SpeechBubble, EventLog, LogPanel
+├── server/src/            # Express API server
+│   ├── ai/                #   PromptTemplates, ApiQueue, SlowLoop
+│   ├── memory/            #   ShortTermBuffer, LongTermMemory, KnowledgeGraph,
+│   │                      #   Reflection, Embeddings
+│   └── __tests__/         #   Vitest test suites
+├── server/data/           # Persisted NPC memory & knowledge (JSON)
+├── public/                # Static assets & CSS
+├── docs/                  # Detailed documentation
+└── vite/                  # Vite configs (dev & prod)
 ```
 
 See the other docs for details on each subsystem.

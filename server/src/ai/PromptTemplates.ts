@@ -1,397 +1,275 @@
-import type { NPCPersona, Observation, ConversationTurn, WorldBelief, Goal } from '../types.js';
+// ── NPC Personas ─────────────────────────────────────────
 
-const NPC_PERSONAS: Record<string, NPCPersona> = {
-    ada: {
-        id: 'ada',
-        name: 'Ada',
-        personality: 'Helpful NPC.',
-        goals: ["Assist"],
-    },
-    bjorn: {
-        id: 'bjorn',
-        name: 'Bjorn',
-        personality: 'Helpful NPC.',
-        goals: ["Assist"],
-    },
-    cora: {
-        id: 'cora',
-        name: 'Cora',
-        personality: 'Helpful NPC.',
-        goals: ["Assist"],
-    },
+const personas: Record<string, { id: string; name: string; personality: string }> = {
+  ada:   { id: 'ada',   name: 'Ada',   personality: 'Thoughtful and methodical. Prefers careful analysis before acting. Values precision and correctness.' },
+  bjorn: { id: 'bjorn', name: 'Bjorn', personality: 'Direct and practical. Focuses on efficient solutions. Values action over deliberation.' },
+  cora:  { id: 'cora',  name: 'Cora',  personality: 'Curious and observant. Notices details others miss. Values learning and exploration.' },
 };
 
-export function getPersona(npcId: string): NPCPersona {
-    return NPC_PERSONAS[npcId] ?? NPC_PERSONAS['ada'];
+export function getPersona(npcId: string) {
+  return personas[npcId] ?? personas['ada'];
 }
 
-export function buildWorldPreamble(): string {
-    return `WORLD: You are in a 64×64 tile grid world. Tiles are grass (walkable) or water (blocked).
-There are exactly 4 entities: Player, Ada, Bjorn, and Cora.
+// ── Protocol Prompts ─────────────────────────────────────
 
-YOUR CAPABILITIES:
-- You can move one tile at a time along walkable paths
-- You can speak, but only entities within ~2 tiles can see your speech bubble
-- You can only interact with entities listed in NEARBY ENTITIES
-- You cannot communicate with distant entities — you must physically travel to them
-- Movement takes real time: roughly 1 tile per second along a path
-
-SKILLS:
-- wander: move to a random nearby tile (for exploration)
-- move_to(x, y): pathfind to a specific coordinate
-- approach_entity(name): walk toward a nearby entity (must be in NEARBY ENTITIES)
-- converse(name): start a conversation (entity must be within 3 tiles)
-- idle: wait in place
-
-IMPORTANT: If an entity is not in your NEARBY ENTITIES list, you don't know where they are. You must either recall their last known position from memory, ask someone who might know, or explore to find them.
-
-`;
-}
-
-export function buildMediumLoopPrompt(
-    persona: NPCPersona,
-    observation: Observation,
-    availableSkills: string[],
-    memories: string[],
-    activeGoal?: Goal,
+/**
+ * Generate a Propose message — decompose a task into sub-tasks with
+ * mechanical completion criteria where possible.
+ */
+export function buildProposePrompt(
+  npcName: string,
+  worldSummary: string,
+  taskDescription: string,
+  capabilities: string,
+  memories: string[],
 ): string {
-    const nearbyList = observation.nearbyEntities.length > 0
-        ? observation.nearbyEntities.map(e => `  - ${e.name} at (${e.position.x},${e.position.y}), distance ${e.distance}`).join('\n')
-        : '  (nobody nearby)';
+  const persona = getPersona(npcName.toLowerCase());
+  const memoryBlock = memories.length > 0
+    ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
+    : '';
 
-    const memorySection = memories.length > 0
-        ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
-        : '';
+  return `You are ${persona.name}, an NPC in a tile-based isometric world. ${persona.personality}
 
-    const eventsSection = observation.recentEvents.length > 0
-        ? `\nRecent events:\n${observation.recentEvents.map(e => `  - ${e}`).join('\n')}`
-        : '';
+${worldSummary}
 
-    const activeGoalSection = observation.activeGoals.length > 0
-        ? `\nActive goals:\n${observation.activeGoals
-            .map((g, i) => {
-                const evalText = g.evaluation.lastEvaluation
-                    ? ` | progress=${g.evaluation.lastEvaluation.progressScore.toFixed(2)} (${g.evaluation.lastEvaluation.summary})`
-                    : ' | progress=unknown';
-                let line = `  ${i + 1}. [${g.status.toUpperCase()}|p=${g.priority.toFixed(2)}] ${g.description}${evalText}`;
-                if (g.evaluation.lastEvaluation?.gapAnalysis) {
-                    line += `\n     GAP: ${g.evaluation.lastEvaluation.gapAnalysis}`;
-                }
-                if (g.planAgenda && g.planAgenda.length > 0) {
-                    line += '\n     PLAN:';
-                    for (const step of g.planAgenda) {
-                        line += `\n       ${step.done ? '\u2705' : '\u2192'} ${step.skill}${step.target ? ` (${step.target})` : ''} \u2014 ${step.purpose}`;
-                    }
-                }
-                return line;
-            })
-            .join('\n')}`
-        : '\nActive goals:\n  (none)';
+Available actions:
+${capabilities}
 
-    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
+${memoryBlock}
 
-Your goals: ${persona.goals.join('; ')}
+A task has been given to you: "${taskDescription}"
 
-Current situation:
-- Position: (${observation.position.x}, ${observation.position.y})
-- Currently doing: ${observation.currentSkill ?? 'nothing'}
-- In conversation: ${observation.isInConversation ? 'yes' : 'no'}
-- Nearby entities:
-${nearbyList}
-${activeGoalSection}${memorySection}${eventsSection}
+Decompose this into concrete sub-tasks. For each sub-task, specify:
+1. A short description
+2. Completion criteria — prefer mechanical conditions (entity_adjacent, entity_at_position, entity_within_range) over vague descriptions
+3. The actions needed, using ONLY these exact JSON shapes:
+   - {"type": "travel_to", "destination": {"x": N, "y": N}}
+   - {"type": "pursue", "target": "EntityName"}
+   - {"type": "flee_from", "threat": "EntityName", "safeDistance": N}
+   - {"type": "speak", "text": "..."}
+   - {"type": "say_to", "target": "EntityName", "text": "..."}
+   - {"type": "converse_with", "target": "EntityName"}
+   - {"type": "wait", "duration": milliseconds}
+4. Dependencies on other sub-tasks (by ID)
 
-Available skills: ${availableSkills.join(', ')}
-
-Choose one skill to execute next. Prioritize active commitments first. If no urgent goal is active, explore or idle.${activeGoal ? buildEvaluationRubric(persona, observation, activeGoal) : ''}`;
-}
-
-function buildEvaluationRubric(persona: NPCPersona, observation: Observation, goal: Goal): string {
-    const allEntities: Array<{ name: string; x: number; y: number }> = [
-        { name: `${persona.name} (you)`, x: observation.position.x, y: observation.position.y },
-        ...observation.nearbyEntities.map(e => ({ name: e.name, x: e.position.x, y: e.position.y })),
-    ];
-
-    let pairwiseSection = '';
-    if (allEntities.length > 1) {
-        const pairs: string[] = [];
-        for (let i = 0; i < allEntities.length; i++) {
-            for (let j = i + 1; j < allEntities.length; j++) {
-                const a = allEntities[i];
-                const b = allEntities[j];
-                const dx = a.x - b.x;
-                const dy = a.y - b.y;
-                const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
-                pairs.push(`  - ${a.name} ↔ ${b.name}: ${dist} tile${dist !== 1 ? 's' : ''}`);
-            }
-        }
-        pairwiseSection = `\nPairwise distances:\n${pairs.join('\n')}`;
+Respond in this exact JSON format:
+{
+  "interpretation": "your understanding of the task in your own words",
+  "subTasks": [
+    {
+      "id": "st_1",
+      "description": "what this sub-task does",
+      "completionCriteria": "how to know it's done",
+      "actions": [{"type": "pursue", "target": "Bjorn"}],
+      "dependencies": []
     }
-
-    const baselineSection = goal.baselineState
-        ? `\nBaseline (when goal was created): ${goal.baselineState}\nScore only genuine progress since goal creation.`
-        : '';
-
-    return `\n\n── GOAL EVALUATION ──
-Also evaluate your current progress on your active goal in the goal_evaluation field.
-GOAL: "${goal.description}"
-SUCCESS CRITERIA: ${goal.evaluation.successCriteria}
-PROGRESS SIGNAL: ${goal.evaluation.progressSignal}
-FAILURE SIGNAL: ${goal.evaluation.failureSignal}
-COMPLETION CONDITION: ${goal.evaluation.completionCondition}${baselineSection}${pairwiseSection}
-Return progress_score (0.0-1.0), summary (one sentence), should_escalate (true if goal needs deeper reasoning), and gap_analysis (what remains to be done).`;
+  ],
+  "completionCriteria": "how to know the whole task is done",
+  "rollupLogic": "why completing all sub-tasks means the task is done",
+  "failureModes": ["what could go wrong"]
 }
 
-export function buildSlowLoopPrompt(
-    persona: NPCPersona,
-    observation: Observation,
-    conversationHistory: ConversationTurn[],
-    partnerName: string,
-    memories: string[],
+Be concrete. Use exact tile coordinates and entity names from the world summary.
+Every sub-task MUST have at least one action. Use entity names exactly as they appear in the world summary.
+Respond ONLY with the JSON object, no other text.`;
+}
+
+/**
+ * Generate dialogue for a conversation turn.
+ */
+export function buildDialoguePrompt(
+  npcName: string,
+  worldSummary: string,
+  partner: string,
+  history: { speaker: string; text: string }[],
+  purpose: string | undefined,
+  memories: string[],
 ): string {
-    const historyText = conversationHistory.length > 0
-        ? conversationHistory.map(t => `${t.speaker}: "${t.text}"`).join('\n')
-        : '(This is the start of the conversation)';
+  const persona = getPersona(npcName.toLowerCase());
+  const memoryBlock = memories.length > 0
+    ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
+    : '';
 
-    const memorySection = memories.length > 0
-        ? `\nRelevant memories about ${partnerName}:\n${memories.map(m => `  - ${m}`).join('\n')}`
-        : '';
+  const historyBlock = history.length > 0
+    ? `\nConversation so far:\n${history.map(t => `  ${t.speaker}: ${t.text}`).join('\n')}`
+    : '\nThis is the start of the conversation.';
 
-    const activeGoals = observation.activeGoals.filter(g => g.status === 'active');
-    let goalDirective = '';
-    if (activeGoals.length > 0) {
-        goalDirective = '\n── ACTIVE GOALS (use this conversation to advance them) ──';
-        for (const g of activeGoals) {
-            const evalText = g.evaluation.lastEvaluation
-                ? `Progress: ${g.evaluation.lastEvaluation.progressScore.toFixed(2)} — ${g.evaluation.lastEvaluation.summary}`
-                : 'Progress: not yet evaluated';
-            goalDirective += `\n  GOAL (priority ${g.priority.toFixed(2)}): ${g.description}`;
-            goalDirective += `\n    ${evalText}`;
-            goalDirective += `\n    Success criteria: ${g.evaluation.successCriteria}`;
-            if (g.evaluation.lastEvaluation?.gapAnalysis) {
-                goalDirective += `\n    Gap: ${g.evaluation.lastEvaluation.gapAnalysis}`;
-            }
-        }
-        goalDirective += `\n\n  INSTRUCTION: Be direct with ${partnerName} about what you need. If ${partnerName} can help with your goal, ask them to do a specific task. Don't make small talk — get to the point.`;
-    }
+  const purposeBlock = purpose
+    ? `\nYou have a specific purpose for this conversation: ${purpose}`
+    : '';
 
-    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
+  return `You are ${persona.name}, an NPC in a tile-based isometric world. ${persona.personality}
 
-Personality goals: ${persona.goals.join('; ')}
-${memorySection}${goalDirective}
+${worldSummary}
+${memoryBlock}
 
-You are having a conversation with ${partnerName}.
+You are talking to ${partner}.${purposeBlock}
+${historyBlock}
 
-Conversation so far:
-${historyText}
+Respond as ${persona.name}. Keep your response natural and in-character.
+Keep it concise — 1-2 sentences unless the situation calls for more.
 
-Respond naturally as ${persona.name}. Keep your response brief (1-2 sentences). Stay in character.${activeGoals.length > 0 ? ' Your active goal takes priority — steer the conversation toward it.' : ' Be genuine and interesting.'} Don't repeat what was already said.
-
-Goal extraction rules:
-- If you are asking ${partnerName} to perform a task, set shouldCreateGoal=true with delegation.delegateToPartner=true.
-  The delegated goal must be specific and actionable (e.g. "Go to tile (14, 10)"), not vague (e.g. "help out").
-- If ${partnerName} is asking you to do something, set shouldCreateGoal=true with delegation.delegatedTask=true.
-- If there is a clear commitment or intention, set shouldCreateGoal=true.
-- Otherwise set shouldCreateGoal=false.
-- If the task is ambiguous, mark needsClarification=true and provide a concise clarification question.`;
+Respond in this exact JSON format:
+{
+  "dialogue": "what you say",
+  "internalThought": "brief private reasoning (not shown to other characters)",
+  "taskRequested": "a brief description of what you've been asked to DO, or null if this is just conversation"
 }
 
-export function buildReasoningPrompt(
-    persona: NPCPersona,
-    observation: Observation,
-    memories: string[],
-    beliefs: WorldBelief,
-    context: { stuckCount?: number; failedSkill?: string },
-    knowledgeSummary?: string,
-): string {
-    const nearbyList = observation.nearbyEntities.length > 0
-        ? observation.nearbyEntities.map(e => `  - ${e.name} at (${e.position.x},${e.position.y}), distance ${e.distance}`).join('\n')
-        : '  (nobody nearby)';
+Set "taskRequested" to a short task description ONLY if the speaker is asking you to perform an action, go somewhere, find something, deliver a message, etc. Regular greetings, questions, or chitchat should have "taskRequested": null.
 
-    const memorySection = memories.length > 0
-        ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
-        : '';
-
-    const eventsSection = observation.recentEvents.length > 0
-        ? `\nRecent events:\n${observation.recentEvents.map(e => `  - ${e}`).join('\n')}`
-        : '';
-
-    let beliefSection = '';
-    const entityNames = Object.keys(beliefs.knownEntities);
-    if (entityNames.length > 0 || beliefs.insights.length > 0) {
-        beliefSection = '\nYour beliefs about the world:';
-        if (entityNames.length > 0) {
-            beliefSection += '\n  Known entities:';
-            for (const name of entityNames) {
-                const info = beliefs.knownEntities[name];
-                beliefSection += `\n    - ${name}: ${info.relationship} (last seen at ${info.lastSeen.x},${info.lastSeen.y})`;
-            }
-        }
-        if (beliefs.insights.length > 0) {
-            beliefSection += '\n  Insights:';
-            for (const insight of beliefs.insights) {
-                beliefSection += `\n    - ${insight}`;
-            }
-        }
-    }
-
-    let situationContext = '';
-    if (context.stuckCount && context.stuckCount > 0) {
-        situationContext = `\nYou've been stuck ${context.stuckCount} times recently.`;
-        if (context.failedSkill) {
-            situationContext += ` Your last attempt was "${context.failedSkill}" which didn't work.`;
-        }
-        situationContext += ' Consider a different approach.';
-    }
-
-    const activeGoals = observation.activeGoals.filter(g => g.status === 'active');
-    let activeGoalSection = '';
-    if (activeGoals.length > 0) {
-        activeGoalSection = '\n── ACTIVE GOALS (your plan MUST advance these) ──';
-        for (const g of activeGoals) {
-            const evalText = g.evaluation.lastEvaluation
-                ? `Progress: ${g.evaluation.lastEvaluation.progressScore.toFixed(2)} — ${g.evaluation.lastEvaluation.summary}`
-                : 'Progress: not yet evaluated';
-            activeGoalSection += `\n  GOAL (priority ${g.priority.toFixed(2)}): ${g.description}`;
-            activeGoalSection += `\n    ${evalText}`;
-            activeGoalSection += `\n    Success: ${g.evaluation.successCriteria}`;
-            activeGoalSection += `\n    Completion: ${g.evaluation.completionCondition}`;
-            if (g.evaluation.lastEvaluation?.gapAnalysis) {
-                activeGoalSection += `\n    Gap: ${g.evaluation.lastEvaluation.gapAnalysis}`;
-            }
-        }
-    }
-
-    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
-
-Personality goals: ${persona.goals.join('; ')}
-
-Current situation:
-- Position: (${observation.position.x}, ${observation.position.y})
-- Currently doing: ${observation.currentSkill ?? 'nothing'}
-- Nearby entities:
-${nearbyList}
-${activeGoalSection}${memorySection}${eventsSection}${beliefSection}${situationContext}${knowledgeSummary ? '\nKnowledge graph:\n' + knowledgeSummary : ''}
-
-Produce a concrete, goal-directed plan. Each action must advance an active goal. Do NOT produce abstract reflections or poetic monologues.
-
-Prioritize:
-1. Active goals above all else
-2. If someone nearby can help, plan to converse and delegate
-3. If you need to find someone, move toward their last known position
-4. Only fall back to personality goals if no active goals exist`;
+Respond ONLY with the JSON object, no other text.`;
 }
 
-export function buildReflectionPrompt(
-    events: string[],
-    context?: { activeGoals?: string[]; recentOutcomes?: string[] },
+/**
+ * Evaluate a proposal — generate a Question or approve it.
+ */
+export function buildQuestionPrompt(
+  npcName: string,
+  proposal: {
+    taskDescription: string;
+    interpretation: string;
+    subTasks: { id: string; description: string; completionCriteria: string }[];
+    completionCriteria: string;
+    rollupLogic: string;
+  },
+  worldSummary: string,
+  memories: string[],
 ): string {
-    const goalSection = context?.activeGoals && context.activeGoals.length > 0
-        ? `\nActive goals during this period:\n${context.activeGoals.map(g => `- ${g}`).join('\n')}`
-        : '';
+  const persona = getPersona(npcName.toLowerCase());
+  const memoryBlock = memories.length > 0
+    ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
+    : '';
 
-    const outcomeSection = context?.recentOutcomes && context.recentOutcomes.length > 0
-        ? `\nRecent goal outcomes:\n${context.recentOutcomes.map(o => `- ${o}`).join('\n')}`
-        : '';
+  const subTaskList = proposal.subTasks.map(st =>
+    `  - [${st.id}] ${st.description} (done when: ${st.completionCriteria})`
+  ).join('\n');
 
-    return `${buildWorldPreamble()}Review these recent observations and distill them into 1-3 key insights. Focus on patterns, relationships, and useful knowledge.
+  return `You are ${persona.name}, critically evaluating a plan. ${persona.personality}
 
-Observations:
-${events.map(e => `- ${e}`).join('\n')}
-${goalSection}${outcomeSection}
+${worldSummary}
+${memoryBlock}
 
-Write each insight as a single concise sentence.`;
+A plan has been proposed:
+Task: "${proposal.taskDescription}"
+Interpretation: "${proposal.interpretation}"
+Sub-tasks:
+${subTaskList}
+Overall completion: "${proposal.completionCriteria}"
+Rollup logic: "${proposal.rollupLogic}"
+
+Evaluate this plan for:
+- Completeness: does the decomposition cover all cases?
+- Criteria: does completing sub-tasks actually guarantee the parent task?
+- Assumptions: is the plan based on correct/current world state?
+- Efficiency: is there a simpler approach?
+
+If you find a concern, respond with:
+{
+  "approved": false,
+  "kind": "completeness|criteria|assumption|efficiency",
+  "concern": "what's wrong",
+  "evidence": "why you think so",
+  "suggestedAlternative": "a better approach"
 }
 
-export function buildSelfCritiquePrompt(
-    persona: NPCPersona,
-    failureEvents: string[],
-    context: {
-        skill?: string;
-        stuckCount?: number;
-        goalDescription?: string;
-        evaluationCriteria?: string;
-        outcome?: string;
-        resourceCost?: string;
-    },
-): string {
-    return `${buildWorldPreamble()}You are ${persona.name}. ${persona.personality}
+If the plan looks sound, respond with:
+{ "approved": true }
 
-You recently experienced failures while trying to act in the world:
-${failureEvents.map(e => `- ${e}`).join('\n')}
-
-${context.skill ? `The skill you were using: "${context.skill}"` : ''}
-${context.stuckCount ? `You got stuck ${context.stuckCount} times.` : ''}
-${context.goalDescription ? `Goal: "${context.goalDescription}"` : ''}
-${context.evaluationCriteria ? `Evaluation criteria: ${context.evaluationCriteria}` : ''}
-${context.outcome ? `Outcome: ${context.outcome}` : ''}
-${context.resourceCost ? `Resource cost: ${context.resourceCost}` : ''}
-
-Analyze what went wrong. Write 1-2 specific, actionable lessons learned. Each lesson should be a single sentence that will help you avoid this exact mistake in the future.
-
-Examples of good lessons:
-- "Water tiles at the edge of ponds are not walkable, approach from the opposite side."
-- "Trying to move_to a tile occupied by another entity will always fail."
-- "When stuck repeatedly, try wandering in a different direction instead of the same path."
-
-Write only the lessons, one per line.`;
+Respond ONLY with the JSON object, no other text.`;
 }
 
-export function buildGoalEvaluationPrompt(
-    persona: NPCPersona,
-    observation: Observation,
-    goal: Goal,
+/**
+ * Revise a proposal in response to a Question.
+ */
+export function buildRevisePrompt(
+  npcName: string,
+  originalProposal: {
+    taskDescription: string;
+    interpretation: string;
+    subTasks: { id: string; description: string; completionCriteria: string }[];
+    completionCriteria: string;
+  },
+  question: {
+    kind: string;
+    concern: string;
+    evidence: string;
+    suggestedAlternative?: string;
+  },
+  worldSummary: string,
 ): string {
-    // Build structured entity list with positions
-    const allEntities: Array<{ name: string; x: number; y: number }> = [
-        { name: `${persona.name} (you)`, x: observation.position.x, y: observation.position.y },
-        ...observation.nearbyEntities.map(e => ({ name: e.name, x: e.position.x, y: e.position.y })),
-    ];
+  const persona = getPersona(npcName.toLowerCase());
+  const subTaskList = originalProposal.subTasks.map(st =>
+    `  - [${st.id}] ${st.description} (done when: ${st.completionCriteria})`
+  ).join('\n');
 
-    const entitySection = allEntities.length > 1
-        ? 'ENTITIES:\n' + allEntities.map(e => `- ${e.name}: at (${e.x}, ${e.y})`).join('\n')
-        : 'ENTITIES:\n- (nobody nearby)';
+  return `You are ${persona.name}, revising a plan based on feedback. ${persona.personality}
 
-    // Compute pairwise distances between all entities
-    let pairwiseSection = '';
-    if (allEntities.length > 1) {
-        const pairs: string[] = [];
-        for (let i = 0; i < allEntities.length; i++) {
-            for (let j = i + 1; j < allEntities.length; j++) {
-                const a = allEntities[i];
-                const b = allEntities[j];
-                const dx = a.x - b.x;
-                const dy = a.y - b.y;
-                const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
-                pairs.push(`- ${a.name} ↔ ${b.name}: ${dist} tile${dist !== 1 ? 's' : ''}`);
-            }
-        }
-        pairwiseSection = '\n\nPAIRWISE DISTANCES:\n' + pairs.join('\n');
+${worldSummary}
+
+Your original plan:
+Task: "${originalProposal.taskDescription}"
+Sub-tasks:
+${subTaskList}
+
+A concern was raised (${question.kind}):
+Concern: "${question.concern}"
+Evidence: "${question.evidence}"
+${question.suggestedAlternative ? `Suggested alternative: "${question.suggestedAlternative}"` : ''}
+
+Revise your plan to address this concern. Keep what works, fix what doesn't.
+
+Respond in this exact JSON format:
+{
+  "whatChanged": "summary of changes",
+  "updatedSubTasks": [
+    {
+      "id": "st_1",
+      "description": "updated description",
+      "completionCriteria": "updated criteria",
+      "actions": [{"type": "action_name", ...params}],
+      "dependencies": []
     }
+  ],
+  "updatedCompletionCriteria": "updated overall criteria",
+  "impactOnInProgress": "how this affects work already started"
+}
 
-    const baselineSection = goal.baselineState
-        ? `\nBASELINE (when goal was created):\n${goal.baselineState}\n\nScore only genuine progress since goal creation — do not credit pre-existing conditions.`
-        : '';
+Respond ONLY with the JSON object, no other text.`;
+}
 
-    return `${buildWorldPreamble()}You are ${persona.name}. Evaluate progress on your active goal.
+/**
+ * Distill lessons from a completed task.
+ */
+export function buildRememberPrompt(
+  npcName: string,
+  taskContext: string,
+  outcome: string,
+): string {
+  const persona = getPersona(npcName.toLowerCase());
 
-GOAL: "${goal.description}"
-SUCCESS CRITERIA: ${goal.evaluation.successCriteria}
-PROGRESS SIGNAL: ${goal.evaluation.progressSignal}
-FAILURE SIGNAL: ${goal.evaluation.failureSignal}
-COMPLETION CONDITION: ${goal.evaluation.completionCondition}
-${baselineSection}
-CURRENT STATE:
-- Current skill: ${observation.currentSkill ?? 'none'}
-- Recent events:
-${observation.recentEvents.length > 0 ? observation.recentEvents.map(e => `  - ${e}`).join('\n') : '  - none'}
+  return `You are ${persona.name}, reflecting on a completed task. ${persona.personality}
 
-${entitySection}${pairwiseSection}
+Task context:
+${taskContext}
 
-Use the exact positions and pairwise distances above to verify each sub-condition of the success criteria.
+Outcome: ${outcome}
 
-Return an evaluation with:
-- progress_score (0.0-1.0)
-- summary (one sentence)
-- should_escalate (true if goal needs deep reasoning help)
-- gap_analysis: list what remains to be done. For each sub-condition, state whether it is met or not. Include specific entity names, positions, and the next concrete step.`;
+Extract 1-3 short, reusable lessons from this experience. Focus on:
+- What worked well that should be repeated
+- What failed that should be avoided
+- Patterns that might apply to future tasks
+
+Respond in this exact JSON format:
+{
+  "lessons": [
+    {
+      "kind": "lesson|pattern|capability|failure",
+      "content": "the insight in one sentence",
+      "scope": "individual|shared"
+    }
+  ]
+}
+
+Respond ONLY with the JSON object, no other text.`;
 }

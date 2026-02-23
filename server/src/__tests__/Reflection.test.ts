@@ -15,18 +15,11 @@ vi.mock('../memory/KnowledgeGraph.js', () => ({
 }));
 
 vi.mock('../ai/PromptTemplates.js', () => ({
-    buildReflectionPrompt: vi.fn(() => 'mock reflection prompt'),
-    buildSelfCritiquePrompt: vi.fn(() => 'mock self-critique prompt'),
     getPersona: vi.fn(() => ({
         id: 'test',
         name: 'TestNpc',
         personality: 'Curious',
-        goals: ['Explore'],
     })),
-}));
-
-vi.mock('../skills/SkillLibrary.js', () => ({
-    recordOutcome: vi.fn(async () => {}),
 }));
 
 // Mock Anthropic SDK
@@ -44,7 +37,6 @@ import { reflect, selfCritique } from '../memory/Reflection.js';
 import { getAll, clear } from '../memory/ShortTermBuffer.js';
 import { addMemory } from '../memory/LongTermMemory.js';
 import { addRule } from '../memory/KnowledgeGraph.js';
-import { recordOutcome } from '../skills/SkillLibrary.js';
 import type { ShortTermEntry } from '../memory/ShortTermBuffer.js';
 
 function makeEntries(count: number): ShortTermEntry[] {
@@ -113,9 +105,6 @@ describe('Reflection', () => {
 
             await selfCritique('test-npc', ['got stuck at (5,5)'], { skill: 'move_to', stuckCount: 3 });
 
-            // Should record skill failure
-            expect(recordOutcome).toHaveBeenCalledWith('move_to', false);
-
             // Should store lessons as high-importance memories
             expect(addMemory).toHaveBeenCalledTimes(2);
             expect(vi.mocked(addMemory).mock.calls[0][2]).toBe('lesson');
@@ -131,7 +120,6 @@ describe('Reflection', () => {
             // Should not throw
             await selfCritique('test-npc', ['failed action'], { skill: 'wander' });
 
-            expect(recordOutcome).toHaveBeenCalledWith('wander', false);
             // No lessons stored since LLM failed
             expect(addMemory).not.toHaveBeenCalled();
         });

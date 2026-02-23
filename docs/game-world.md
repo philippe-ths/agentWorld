@@ -26,4 +26,4 @@ Spawn points:
 
 ## Pathfinding
 
-Client-side **A\*** (`src/game/ai/Pathfinding.ts`) with Manhattan heuristic. Used by `wander`, `move_to`, and `approach_entity` skills to convert a target tile into a sequence of `move` actions.
+Client-side **A\*** (`src/game/ai/Pathfinding.ts`) with Manhattan heuristic. Used by the `BehaviorMachine` for `travel_to`, `pursue`, and `flee_from` actions to convert target positions into step-by-step tile movement.

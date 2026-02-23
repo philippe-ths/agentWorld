@@ -1,8 +1,7 @@
 import { getAll, clear } from './ShortTermBuffer.js';
 import { addMemory } from './LongTermMemory.js';
 import { addRule } from './KnowledgeGraph.js';
-import { buildReflectionPrompt, buildSelfCritiquePrompt, getPersona } from '../ai/PromptTemplates.js';
-import { recordOutcome } from '../skills/SkillLibrary.js';
+import { getPersona } from '../ai/PromptTemplates.js';
 import { enqueue, Priority } from '../ai/ApiQueue.js';
 
 export async function reflect(
@@ -19,10 +18,8 @@ export async function reflect(
         return `[${new Date(o.timestamp).toLocaleTimeString()}] At (${o.position.x},${o.position.y})${nearby}: ${o.event}`;
     });
 
-    const prompt = buildReflectionPrompt(events, {
-        activeGoals: context?.activeGoals,
-        recentOutcomes: context?.recentOutcomes,
-    });
+    const persona = getPersona(npcId);
+    const prompt = `You are ${persona.name} (${persona.personality}). Reflect on these recent events and extract insights:\n${events.join('\n')}`;
 
     try {
         const response = await enqueue(Priority.BACKGROUND, {
@@ -64,12 +61,7 @@ export async function selfCritique(
     if (failureEvents.length === 0) return;
 
     const persona = getPersona(npcId);
-    const prompt = buildSelfCritiquePrompt(persona, failureEvents, context);
-
-    // Record skill failure
-    if (context.skill) {
-        await recordOutcome(context.skill, false);
-    }
+    const prompt = `You are ${persona.name} (${persona.personality}). Analyze these failures and extract short lessons:\n${failureEvents.join('\n')}`;
 
     try {
         const response = await enqueue(Priority.BACKGROUND, {

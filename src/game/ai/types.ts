@@ -1,24 +1,75 @@
-import { TilePos } from '../entities/Entity';
+import type { TilePos } from '../entities/Entity';
+import type { Condition } from './ConditionChecker';
 
-// ── Actions the NPC executes in the fast loop ────────────
+// ── Base actions ─────────────────────────────────────────
 
-export interface MoveAction {
-    type: 'move';
-    target: TilePos;
+export interface MoveAction { type: 'move'; target: TilePos; }
+export interface WaitAction { type: 'wait'; duration: number; }
+export interface SpeakAction { type: 'speak'; text: string; target?: string; }
+
+// ── Structured actions ───────────────────────────────────
+
+/** Travel to a position using pathfinding. Re-paths on obstacles. */
+export interface TravelToAction {
+  type: 'travel_to';
+  destination: TilePos;
+  onArrive?: Action[];
+  onFail?: Action[];
 }
 
-export interface WaitAction {
-    type: 'wait';
-    duration: number; // ms
+/** Pursue a moving entity until adjacent. Re-paths continuously. */
+export interface PursueAction {
+  type: 'pursue';
+  target: string;
+  onCatch?: Action[];
+  timeoutMs?: number;
+  onTimeout?: Action[];
 }
 
-export interface SpeakAction {
-    type: 'speak';
-    text: string;
-    target?: string; // entity name
+/** Flee from an entity until distance > safeDistance. */
+export interface FleeAction {
+  type: 'flee_from';
+  threat: string;
+  safeDistance: number;
+  onSafe?: Action[];
 }
 
-export type Action = MoveAction | WaitAction | SpeakAction;
+/** Wait until a condition becomes true. */
+export interface WaitUntilAction {
+  type: 'wait_until';
+  condition: Condition;
+  timeoutMs?: number;
+  onComplete?: Action[];
+  onTimeout?: Action[];
+}
+
+/** Travel to an entity and speak to them. */
+export interface SayToAction {
+  type: 'say_to';
+  target: string;
+  text: string;
+  onDelivered?: Action[];
+}
+
+/** Travel to an entity and start a conversation. */
+export interface ConverseWithAction {
+  type: 'converse_with';
+  target: string;
+  purpose?: string;
+  onComplete?: Action[];
+}
+
+/** Execute actions in sequence. */
+export interface SequenceAction {
+  type: 'sequence';
+  actions: Action[];
+}
+
+export type Action =
+  | MoveAction | WaitAction | SpeakAction
+  | TravelToAction | PursueAction | FleeAction
+  | WaitUntilAction | SayToAction | ConverseWithAction
+  | SequenceAction;
 
 // ── Observation sent to backend ──────────────────────────
 
@@ -37,7 +88,6 @@ export interface Observation {
     isInConversation: boolean;
     currentSkill: string | null;
     recentEvents: string[];
-    activeGoals: Goal[];
 }
 
 // ── Backend responses ────────────────────────────────────
@@ -62,8 +112,6 @@ export interface ReasoningResult {
     actions?: Action[];
     dialogue?: string;
     beliefs?: Record<string, unknown>;
-    newSkill?: { name: string; description: string; steps?: string[]; preconditions?: string[] };
-    goalExtraction?: DialogueGoalExtraction;
     llmUsage?: LLMUsage;
 }
 
@@ -72,96 +120,4 @@ export interface LLMUsage {
     inputTokens: number;
     outputTokens: number;
     estimatedCostUSD: number;
-}
-
-export interface GoalSource {
-    type: 'player_dialogue' | 'npc_dialogue' | 'self_initiated' | 'delegated';
-    conversationId?: string;
-    assignedBy?: string;
-}
-
-export interface GoalEvaluation {
-    successCriteria: string;
-    progressSignal: string;
-    failureSignal: string;
-    completionCondition: string;
-    lastEvaluation?: {
-        timestamp: number;
-        progressScore: number;
-        summary: string;
-        shouldEscalate: boolean;
-        gapAnalysis?: string;
-    };
-    evaluationHistory?: number[];
-}
-
-export interface GoalEvaluationResult {
-    timestamp: number;
-    progressScore: number;
-    summary: string;
-    shouldEscalate: boolean;
-    gapAnalysis?: string;
-    llmUsage?: LLMUsage;
-}
-
-export interface GoalResourceProfile {
-    totalTokensIn: number;
-    totalTokensOut: number;
-    estimatedCostUSD: number;
-    haikuCalls: number;
-    sonnetCalls: number;
-    embeddingCalls: number;
-    pathfindingCalls: number;
-    evaluationCalls: number;
-    wallClockMs: number;
-    apiLatencyMs: number;
-    mediumLoopTicks: number;
-    runwayUsed?: boolean;
-    productiveEscalations?: number;
-    unproductiveEscalations?: number;
-}
-
-export interface PlanStep {
-    skill: string;
-    target?: string;
-    purpose: string;
-    done: boolean;
-}
-
-export interface Goal {
-    id: string;
-    npcId: string;
-    type: string;
-    description: string;
-    source: GoalSource;
-    evaluation: GoalEvaluation;
-    status: 'active' | 'completed' | 'failed' | 'abandoned';
-    priority: number;
-    createdAt: number;
-    expiresAt: number | null;
-    resources: GoalResourceProfile;
-    parentGoalId: string | null;
-    delegatedTo: string | null;
-    delegatedFrom: string | null;
-    estimatedDifficulty?: 'trivial' | 'simple' | 'moderate' | 'complex';
-    planAgenda?: PlanStep[];
-    baselineState?: string;
-}
-
-export interface DialogueGoalExtraction {
-    shouldCreateGoal: boolean;
-    goal?: {
-        type: string;
-        description: string;
-        priority: number;
-        evaluation: GoalEvaluation;
-        estimatedDifficulty: 'trivial' | 'simple' | 'moderate' | 'complex';
-        needsClarification: boolean;
-        clarificationQuestion?: string;
-        delegation?: {
-            delegateToPartner?: boolean;
-            delegatedTask?: boolean;
-            rationale?: string;
-        };
-    };
 }

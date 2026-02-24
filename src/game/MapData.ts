@@ -1,7 +1,7 @@
 export const TILE_WATER = 1;
 
-export const MAP_WIDTH = 64;
-export const MAP_HEIGHT = 64;
+export const MAP_WIDTH = 30;
+export const MAP_HEIGHT = 30;
 
 // Seeded PRNG (mulberry32)
 function mulberry32(seed: number) {

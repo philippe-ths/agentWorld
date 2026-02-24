@@ -2,39 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/style.css">
     <title>Agent World</title>
 </head>
-
 <body>
-    <div id="app">
-        <div id="game-container"></div>
-
-        <div id="control-bar">
-            <button id="btn-play" title="Play">▶</button>
-            <button id="btn-pause" title="Pause">⏸</button>
-            <button id="btn-restart" title="Restart">↺</button>
-        </div>
-
-        <button id="log-toggle" title="Toggle log">📋</button>
-        <div id="log-panel" class="collapsed">
-            <div id="npc-selector">
-                <button class="npc-filter-btn active" data-npc-id="">All</button>
-                <button class="npc-filter-btn" data-npc-id="ada">Ada</button>
-                <button class="npc-filter-btn" data-npc-id="bjorn">Bjorn</button>
-                <button class="npc-filter-btn" data-npc-id="cora">Cora</button>
-                <button id="log-download" title="Download log">⬇</button>
-            </div>
-            <div id="npc-awareness" class="hidden"></div>
-            <div id="log-entries"></div>
-        </div>
-
-        <div id="chat-container" class="hidden">
-            <input id="chat-input" type="text" placeholder="Type a message..." maxlength="200" autocomplete="off" />
-        </div>
-    </div>
+    <div id="game-container"></div>
     <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

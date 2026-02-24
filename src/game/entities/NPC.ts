@@ -1,23 +1,10 @@
 import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
-import { Action } from '../ai/types';
-import { AgentLoop } from '../ai/AgentLoop';
-import { BehaviorMachine } from '../ai/BehaviorMachine';
-import type { ProtocolAgent } from '../protocol/ProtocolAgent';
-import type { EntityManager } from './EntityManager';
-import type { WorldQuery } from '../world/WorldQuery';
-import { log as logEvent } from '../ui/EventLog';
 
 export class NPC extends Entity {
-    readonly id: string;
-    isInConversation = false;
-    currentSkill: string | null = null;
-    recentEvents: string[] = [];
-
-    behaviorMachine!: BehaviorMachine;
-    protocolAgent?: ProtocolAgent;
-    private agentLoop?: AgentLoop;
-    private completionCheckAccum = 0;
+    private moveTarget: TilePos | null = null;
+    private waitTimer = 0;
+    private nextMoveDelay = 0;
 
     constructor(
         scene: Scene,
@@ -28,56 +15,55 @@ export class NPC extends Entity {
         tint: number,
     ) {
         super(scene, map, 'player', startTile, checkWalkable, name);
-        this.id = name.toLowerCase().replace(/\s+/g, '_');
         this.sprite.setTint(tint);
+        this.nextMoveDelay = 1000 + Math.random() * 3000;
     }
 
-    initAgentLoop(entityManager: EntityManager) {
-        this.agentLoop = new AgentLoop(this, entityManager);
-    }
-
-    initBehaviorMachine(world: WorldQuery, entityManager: EntityManager) {
-        this.behaviorMachine = new BehaviorMachine(this, world, entityManager);
-    }
-
-    pauseAI() { this.agentLoop?.pause(); }
-    resumeAI() { this.agentLoop?.resume(); }
-
-    restartAI(startTile: TilePos) {
-        this.agentLoop?.restart();
-        this.recentEvents = [];
-        this.currentSkill = null;
-        this.isInConversation = false;
-        this.tilePos = { ...startTile };
-        const worldPos = this.map.tileToWorldXY(startTile.x, startTile.y)!;
-        this.sprite.setPosition(worldPos.x + 32, worldPos.y + 16);
-        this.updateDepth();
-    }
-
-    /** Backwards-compatible: converts action array into a sequence for BehaviorMachine. */
-    setPlan(actions: Action[]) {
-        if (actions.length > 0) {
-            this.behaviorMachine.execute({ type: 'sequence', actions });
+    update(_time: number, delta: number) {
+        if (this.moveTarget) {
+            if (this.isMoving) return;
+            this.stepToward(this.moveTarget);
+            return;
         }
+
+        // Waiting between wanders
+        this.waitTimer += delta;
+        if (this.waitTimer < this.nextMoveDelay) return;
+        this.waitTimer = 0;
+        this.nextMoveDelay = 2000 + Math.random() * 4000;
+
+        // Pick a random nearby tile to walk to
+        const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+        const dir = dirs[Math.floor(Math.random() * dirs.length)];
+        const dist = 1 + Math.floor(Math.random() * 3);
+        this.moveTarget = {
+            x: this.tilePos.x + dir.x * dist,
+            y: this.tilePos.y + dir.y * dist,
+        };
     }
 
-    update(time: number, delta: number) {
-        this.agentLoop?.update(time, delta);
-        this.behaviorMachine?.update(time, delta);
+    private stepToward(target: TilePos) {
+        const dx = Math.sign(target.x - this.tilePos.x);
+        const dy = Math.sign(target.y - this.tilePos.y);
 
-        // Periodically check mechanical completion conditions (~500ms)
-        this.completionCheckAccum += delta;
-        if (this.completionCheckAccum >= 500) {
-            this.completionCheckAccum = 0;
-            this.protocolAgent?.checkCompletions();
+        if (dx === 0 && dy === 0) {
+            this.moveTarget = null;
+            return;
         }
-    }
 
-    addEvent(event: string) {
-        this.recentEvents.push(event);
-        if (this.recentEvents.length > 20) {
-            this.recentEvents.shift();
+        let moved = false;
+        if (Math.abs(target.x - this.tilePos.x) >= Math.abs(target.y - this.tilePos.y)) {
+            if (dx !== 0) moved = this.moveTo(dx, 0);
+            if (!moved && dy !== 0) moved = this.moveTo(0, dy);
+        } else {
+            if (dy !== 0) moved = this.moveTo(0, dy);
+            if (!moved && dx !== 0) moved = this.moveTo(dx, 0);
         }
-        logEvent(this.name, 'action', event, { npcId: this.id });
+
+        if (this.tilePos.x === target.x && this.tilePos.y === target.y) {
+            this.moveTarget = null;
+        } else if (!moved) {
+            this.moveTarget = null; // stuck, give up
+        }
     }
 }

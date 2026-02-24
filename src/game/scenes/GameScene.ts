@@ -4,23 +4,12 @@ import { TILE_W, TILE_H } from '../entities/Entity';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
-import { WorldQuery } from '../world/WorldQuery';
-import { ConversationManager } from '../ai/ConversationManager';
-import { ProtocolRouter } from '../protocol/ProtocolRouter';
-import { ProtocolAgent } from '../protocol/ProtocolAgent';
-import { ChatController } from '../ui/ChatController';
-import { ControlBar } from '../ui/ControlBar';
-import { LogPanel } from '../ui/LogPanel';
-import { connectServerLogStream } from '../ui/ServerLogBridge';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
 export class GameScene extends Scene {
-    map!: Phaser.Tilemaps.Tilemap;
-    private groundLayer!: Phaser.Tilemaps.TilemapLayer;
-    entityManager!: EntityManager;
-    worldQuery!: WorldQuery;
-    protocolRouter!: ProtocolRouter;
+    private map!: Phaser.Tilemaps.Tilemap;
+    private entityManager!: EntityManager;
     private player!: Player;
 
     constructor() {
@@ -32,17 +21,10 @@ export class GameScene extends Scene {
         this.createAnimations();
 
         this.entityManager = new EntityManager();
-        this.worldQuery = new WorldQuery(this.entityManager);
-        this.protocolRouter = new ProtocolRouter(this.worldQuery);
         this.player = new Player(this, this.map, { x: 5, y: 5 }, this.entityManager.isWalkable);
         this.entityManager.add(this.player);
 
         this.spawnNPCs();
-        new ConversationManager(this.entityManager);
-        new ChatController(this, this.player, this.entityManager);
-        new ControlBar(this.entityManager);
-        new LogPanel(this.entityManager);
-        connectServerLogStream();
         this.setupCamera();
     }
 
@@ -72,11 +54,11 @@ export class GameScene extends Scene {
             if (ts) tilesets.push(ts);
         }
 
-        this.groundLayer = this.map.createBlankLayer('ground', tilesets, 0, 0)!;
+        const groundLayer = this.map.createBlankLayer('ground', tilesets, 0, 0)!;
 
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
-                this.map.putTileAt(MAP_DATA[y][x], x, y, false, this.groundLayer);
+                this.map.putTileAt(MAP_DATA[y][x], x, y, false, groundLayer);
             }
         }
     }
@@ -146,10 +128,6 @@ export class GameScene extends Scene {
                 this, this.map, def.tile,
                 this.entityManager.isWalkable, def.name, def.tint,
             );
-            npc.initAgentLoop(this.entityManager);
-            npc.initBehaviorMachine(this.worldQuery, this.entityManager);
-            npc.protocolAgent = new ProtocolAgent(npc, this.worldQuery, npc.behaviorMachine, this.protocolRouter);
-            this.protocolRouter.registerNPC(def.name, npc);
             this.entityManager.add(npc);
         }
     }

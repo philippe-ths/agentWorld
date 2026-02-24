@@ -8,28 +8,11 @@ export class EntityManager {
         this.entities.push(entity);
     }
 
-    remove(entity: Entity) {
-        const idx = this.entities.indexOf(entity);
-        if (idx >= 0) this.entities.splice(idx, 1);
-    }
-
-    getAll(): Entity[] {
-        return this.entities;
-    }
-
     updateAll(time: number, delta: number) {
         for (const entity of this.entities) {
             entity.update(time, delta);
-            entity.updateBubble();
+            entity.updateLabel();
         }
-    }
-
-    getEntitiesNear(tileX: number, tileY: number, radius: number): Entity[] {
-        return this.entities.filter(e => {
-            const dx = e.tilePos.x - tileX;
-            const dy = e.tilePos.y - tileY;
-            return Math.sqrt(dx * dx + dy * dy) <= radius;
-        });
     }
 
     isTileOccupied(x: number, y: number): boolean {

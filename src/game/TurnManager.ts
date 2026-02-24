@@ -1,24 +1,29 @@
 import { NPC } from './entities/NPC';
 import { Entity } from './entities/Entity';
-import { MAP_WIDTH, MAP_HEIGHT } from './MapData';
+import { LLMService } from './LLMService';
+import { parseDirectives, Directive } from './DirectiveParser';
+import { buildWorldState } from './WorldState';
+import { EntityManager } from './entities/EntityManager';
 
 /** Number of commands an NPC can execute per turn (each command runs to completion). */
 export const NPC_COMMANDS_PER_TURN = 3;
 
-type TurnState = 'idle' | 'npc-turn';
+type TurnState = 'idle' | 'npc-turn' | 'paused';
 
 export class TurnManager {
     private npcs: NPC[];
+    private allEntities: EntityManager;
     private state: TurnState = 'idle';
     private activeNpc: NPC | null = null;
     private turnNumber = 0;
     private turnLabel!: Phaser.GameObjects.Text;
+    private llm: LLMService;
+    private paused = false;
+    private pauseResolve: (() => void) | null = null;
 
-    /** Called for each NPC's turn — should return an array of commands (up to NPC_COMMANDS_PER_TURN). */
-    onNpcTurn?: (npc: NPC) => Promise<void>;
-
-    constructor(scene: Phaser.Scene, npcs: NPC[]) {
+    constructor(scene: Phaser.Scene, npcs: NPC[], entityManager: EntityManager) {
         this.npcs = npcs;
+        this.allEntities = entityManager;
 
         this.turnLabel = scene.add.text(10, 10, '', {
             fontSize: '14px',
@@ -29,6 +34,10 @@ export class TurnManager {
         });
         this.turnLabel.setScrollFactor(0);
         this.turnLabel.setDepth(1000);
+
+        this.llm = new LLMService(this.turnLabel);
+
+        scene.input.keyboard!.on('keydown-P', () => this.togglePause());
 
         this.runLoop();
     }
@@ -42,43 +51,86 @@ export class TurnManager {
 
     private async runLoop() {
         while (true) {
+            await this.waitIfPaused();
             this.turnNumber++;
             for (const npc of this.npcs) {
+                await this.waitIfPaused();
                 this.state = 'npc-turn';
                 this.activeNpc = npc;
                 this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
 
-                if (this.onNpcTurn) {
-                    await this.onNpcTurn(npc);
-                } else {
-                    // Default: issue random move commands
-                    await this.randomCommands(npc);
-                }
+                await this.runNpcTurn(npc);
+                await this.delay(5000);
             }
 
             this.state = 'idle';
             this.activeNpc = null;
             this.turnLabel.setText(`Turn ${this.turnNumber} complete`);
-            await this.delay(300);
+            await this.delay(5000);
         }
     }
 
-    /** Issue N random move_to commands, each walking to completion before the next. */
-    private async randomCommands(npc: NPC) {
-        const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
-        for (let i = 0; i < NPC_COMMANDS_PER_TURN; i++) {
-            const dir = dirs[Math.floor(Math.random() * dirs.length)];
-            const dist = 1 + Math.floor(Math.random() * 5);
-            const target = {
-                x: Math.max(0, Math.min(MAP_WIDTH - 1, npc.tilePos.x + dir.x * dist)),
-                y: Math.max(0, Math.min(MAP_HEIGHT - 1, npc.tilePos.y + dir.y * dist)),
-            };
-            await npc.walkToAsync(target);
+    private async runNpcTurn(npc: NPC) {
+        let directives: Directive[];
+
+        try {
+            const worldState = buildWorldState(npc, this.allEntities.getEntities());
+            const response = await this.llm.decide(npc.name, worldState);
+            directives = parseDirectives(response);
+        } catch (err) {
+            const msg = (err as Error).message;
+            console.error(
+                `%c[TurnManager] LLM failed for ${npc.name}, falling back to wait(). Error: ${msg}`,
+                'color: #ff4444; font-weight: bold; font-size: 14px',
+            );
+            this.turnLabel.setText(`⚠ ${npc.name}: LLM error — waiting`);
+            directives = [{ type: 'wait' }];
+        }
+
+        // Cap at NPC_COMMANDS_PER_TURN
+        const capped = directives.slice(0, NPC_COMMANDS_PER_TURN);
+
+        for (const dir of capped) {
+            await this.executeDirective(npc, dir);
+        }
+    }
+
+    private async executeDirective(npc: NPC, dir: Directive) {
+        switch (dir.type) {
+            case 'move_to':
+                console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
+                await npc.walkToAsync({ x: dir.x, y: dir.y });
+                break;
+            case 'wait':
+                console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
+                await this.delay(300);
+                break;
         }
     }
 
     private delay(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    togglePause() {
+        this.paused = !this.paused;
+        if (this.paused) {
+            this.turnLabel.setText('⏸ PAUSED (press P to resume)');
+            console.log('%c[TurnManager] Paused', 'color: #ffaa00; font-weight: bold');
+        } else {
+            console.log('%c[TurnManager] Resumed', 'color: #6bff6b; font-weight: bold');
+            if (this.pauseResolve) {
+                this.pauseResolve();
+                this.pauseResolve = null;
+            }
+        }
+    }
+
+    private waitIfPaused(): Promise<void> {
+        if (!this.paused) return Promise.resolve();
+        return new Promise(resolve => {
+            this.pauseResolve = resolve;
+        });
     }
 
     getState(): TurnState {

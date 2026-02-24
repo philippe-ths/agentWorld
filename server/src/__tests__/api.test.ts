@@ -5,9 +5,19 @@ process.env.NODE_ENV = 'test';
 
 // Mock all heavy dependencies used by index.ts route handlers
 
+vi.mock('../ai/MediumLoop.js', () => ({
+    mediumLoopTick: vi.fn(async () => ({ skill: 'idle', params: { duration: 3000 } })),
+}));
+
 vi.mock('../ai/SlowLoop.js', () => ({
     generateDialogue: vi.fn(async () => ({ type: 'dialogue', dialogue: 'Hello!' })),
     generateReasoning: vi.fn(async () => ({ type: 'plan', actions: [{ type: 'wait', duration: 2000 }] })),
+    evaluateGoalProgress: vi.fn(async () => ({
+        timestamp: Date.now(),
+        progressScore: 0.7,
+        summary: 'On track',
+        shouldEscalate: false,
+    })),
 }));
 
 vi.mock('../memory/ShortTermBuffer.js', () => ({
@@ -32,27 +42,18 @@ vi.mock('../memory/KnowledgeGraph.js', () => ({
     addRule: vi.fn(async () => {}),
 }));
 
-vi.mock('../ai/ApiQueue.js', () => ({
-    enqueue: vi.fn(async () => ({
-        content: [{ type: 'text', text: '{}' }],
-    })),
-    Priority: { BACKGROUND: 0, TICK: 1, TACTICAL: 2, REASONING: 3, STRATEGIC: 4, DIALOGUE: 5 },
-    getQueueDepth: vi.fn(() => 0),
+vi.mock('../skills/SkillLibrary.js', () => ({
+    loadLearnedSkills: vi.fn(async () => {}),
+    addSkill: vi.fn(async () => true),
+    recordOutcome: vi.fn(async () => {}),
 }));
 
-vi.mock('../ai/PromptTemplates.js', () => ({
-    getPersona: vi.fn(() => 'Test persona'),
-    buildProposePrompt: vi.fn(() => 'propose prompt'),
-    buildDialoguePrompt: vi.fn(() => 'dialogue prompt'),
-    buildQuestionPrompt: vi.fn(() => 'question prompt'),
-    buildRevisePrompt: vi.fn(() => 'revise prompt'),
-    buildRememberPrompt: vi.fn(() => 'remember prompt'),
-}));
-
-// Import app + mocked enqueue after mocks are set up
+// Import app after mocks are set up
 import { app } from '../index.js';
-import { enqueue } from '../ai/ApiQueue.js';
-const mockEnqueue = enqueue as ReturnType<typeof vi.fn>;
+import { mediumLoopTick } from '../ai/MediumLoop.js';
+import { generateReasoning } from '../ai/SlowLoop.js';
+import { selfCritique } from '../memory/Reflection.js';
+import { recordOutcome } from '../skills/SkillLibrary.js';
 
 // Simple helper to make HTTP requests against the Express app without supertest
 import { createServer, type Server } from 'http';
@@ -100,6 +101,7 @@ const validObservation = {
     isInConversation: false,
     currentSkill: null,
     recentEvents: [],
+    activeGoals: [],
 };
 
 describe('API Endpoints', () => {
@@ -127,6 +129,7 @@ describe('API Endpoints', () => {
             expect(typeof data.totalTokensIn).toBe('number');
             expect(typeof data.totalTokensOut).toBe('number');
             expect(typeof data.estimatedCostUSD).toBe('number');
+            expect(Array.isArray(data.goals)).toBe(true);
         });
     });
 
@@ -218,6 +221,7 @@ describe('API Endpoints', () => {
             });
             expect(status).toBe(200);
             expect(data.status).toBe('recorded');
+            expect(recordOutcome).toHaveBeenCalledWith('wander', true);
         });
 
         it('rejects missing skill', async () => {
@@ -236,228 +240,80 @@ describe('API Endpoints', () => {
         });
     });
 
-    // ── Protocol endpoints ────────────────────────────────
-
-    describe('POST /api/protocol/propose', () => {
-        it('returns a Propose message on success', async () => {
-            mockEnqueue.mockResolvedValueOnce({
-                content: [{ type: 'text', text: JSON.stringify({
-                    interpretation: 'find wood',
-                    subTasks: [{ id: 's1', description: 'chop tree', completionCriteria: 'has wood' }],
-                    completionCriteria: 'wood obtained',
-                    rollupLogic: 'all sub-tasks done',
-                }) }],
-            });
-
-            const { status, data } = await post('/api/protocol/propose', {
-                npcId: 'ada',
-                taskDescription: 'gather wood',
-                worldSummary: 'forest nearby',
-            });
-            expect(status).toBe(200);
-            expect(data.type).toBe('propose');
-            expect(data.from).toBe('ada');
-            expect(data.interpretation).toBe('find wood');
-        });
-
-        it('rejects missing npcId', async () => {
-            const { status } = await post('/api/protocol/propose', {
-                taskDescription: 'gather wood',
-                worldSummary: 'forest',
-            });
-            expect(status).toBe(400);
-        });
-
-        it('rejects missing taskDescription', async () => {
-            const { status } = await post('/api/protocol/propose', {
-                npcId: 'ada',
-                worldSummary: 'forest',
-            });
-            expect(status).toBe(400);
-        });
-
-        it('rejects missing worldSummary', async () => {
-            const { status } = await post('/api/protocol/propose', {
-                npcId: 'ada',
-                taskDescription: 'gather wood',
-            });
-            expect(status).toBe(400);
-        });
-    });
-
-    describe('POST /api/protocol/dialogue', () => {
-        it('returns dialogue on success', async () => {
-            mockEnqueue.mockResolvedValueOnce({
-                content: [{ type: 'text', text: JSON.stringify({
-                    dialogue: 'Hello Bjorn!',
-                    internalThought: 'I should be friendly',
-                }) }],
-            });
-
-            const { status, data } = await post('/api/protocol/dialogue', {
-                npcId: 'ada',
-                partner: 'Bjorn',
-                worldSummary: 'village square',
-            });
-            expect(status).toBe(200);
-            expect(data.dialogue).toBe('Hello Bjorn!');
-            expect(data.internalThought).toBe('I should be friendly');
-        });
-
-        it('rejects missing partner', async () => {
-            const { status } = await post('/api/protocol/dialogue', {
-                npcId: 'ada',
-                worldSummary: 'village',
-            });
-            expect(status).toBe(400);
-        });
-
-        it('rejects missing worldSummary', async () => {
-            const { status } = await post('/api/protocol/dialogue', {
-                npcId: 'ada',
-                partner: 'Bjorn',
-            });
-            expect(status).toBe(400);
-        });
-    });
-
-    describe('POST /api/protocol/evaluate-proposal', () => {
-        const validProposal = {
-            taskDescription: 'gather wood',
-            interpretation: 'find wood',
-            subTasks: [{ id: 's1', description: 'chop', completionCriteria: 'done' }],
-            completionCriteria: 'wood obtained',
-            rollupLogic: 'all done',
+    describe('POST /api/npc/goal/evaluate', () => {
+        const goalPayload = {
+            id: 'goal_ada_1',
+            npcId: 'ada',
+            type: 'follow',
+            description: 'Follow Player closely',
+            source: { type: 'player_dialogue', assignedBy: 'Player' },
+            evaluation: {
+                successCriteria: 'remain within 3 tiles of Player',
+                progressSignal: 'distance to Player',
+                failureSignal: 'distance > 10 tiles for prolonged period',
+                completionCondition: 'Player says stop',
+            },
+            status: 'active',
+            priority: 0.9,
+            createdAt: Date.now(),
+            expiresAt: null,
+            resources: {
+                totalTokensIn: 0,
+                totalTokensOut: 0,
+                estimatedCostUSD: 0,
+                haikuCalls: 0,
+                sonnetCalls: 0,
+                embeddingCalls: 0,
+                pathfindingCalls: 0,
+                evaluationCalls: 0,
+                wallClockMs: 0,
+                apiLatencyMs: 0,
+                mediumLoopTicks: 0,
+            },
+            parentGoalId: null,
+            delegatedTo: null,
+            delegatedFrom: null,
         };
 
-        it('returns approved when LLM approves', async () => {
-            mockEnqueue.mockResolvedValueOnce({
-                content: [{ type: 'text', text: JSON.stringify({ approved: true }) }],
-            });
-
-            const { status, data } = await post('/api/protocol/evaluate-proposal', {
+        it('returns evaluation result', async () => {
+            const { status, data } = await post('/api/npc/goal/evaluate', {
                 npcId: 'ada',
-                proposal: validProposal,
-                worldSummary: 'forest',
+                observation: validObservation,
+                goal: goalPayload,
             });
             expect(status).toBe(200);
-            expect(data.approved).toBe(true);
+            expect(typeof data.progressScore).toBe('number');
+            expect(typeof data.summary).toBe('string');
+            expect(typeof data.shouldEscalate).toBe('boolean');
         });
 
-        it('returns question when LLM questions', async () => {
-            mockEnqueue.mockResolvedValueOnce({
-                content: [{ type: 'text', text: JSON.stringify({
-                    approved: false,
-                    kind: 'feasibility',
-                    concern: 'no axe available',
-                    evidence: 'inventory is empty',
-                }) }],
-            });
-
-            const { status, data } = await post('/api/protocol/evaluate-proposal', {
+        it('rejects invalid payload', async () => {
+            const { status } = await post('/api/npc/goal/evaluate', {
                 npcId: 'ada',
-                proposal: validProposal,
-                worldSummary: 'forest',
-            });
-            expect(status).toBe(200);
-            expect(data.type).toBe('question');
-            expect(data.kind).toBe('feasibility');
-            expect(data.concern).toBe('no axe available');
-        });
-
-        it('rejects missing proposal', async () => {
-            const { status } = await post('/api/protocol/evaluate-proposal', {
-                npcId: 'ada',
-                worldSummary: 'forest',
+                observation: validObservation,
             });
             expect(status).toBe(400);
         });
     });
 
-    describe('POST /api/protocol/revise', () => {
-        it('returns a revised proposal on success', async () => {
-            mockEnqueue.mockResolvedValueOnce({
-                content: [{ type: 'text', text: JSON.stringify({
-                    revisedSubTasks: [{ id: 's1', description: 'find axe first', completionCriteria: 'has axe' }],
-                    revisedCompletionCriteria: 'wood obtained with axe',
-                    explanation: 'need tool first',
-                }) }],
-            });
-
-            const { status, data } = await post('/api/protocol/revise', {
+    describe('POST /api/npc/commitment', () => {
+        it('records commitment relation', async () => {
+            const { status, data } = await post('/api/npc/commitment', {
                 npcId: 'ada',
-                originalProposal: {
-                    taskDescription: 'gather wood',
-                    interpretation: 'find wood',
-                    subTasks: [{ id: 's1', description: 'chop', completionCriteria: 'done' }],
-                    completionCriteria: 'wood obtained',
-                },
-                question: {
-                    kind: 'feasibility',
-                    concern: 'no axe',
-                    evidence: 'empty inventory',
-                },
-                worldSummary: 'forest',
+                from: 'Ada',
+                to: 'Bjorn',
+                goalId: 'goal_ada_1',
+                description: 'Go to pond near (30,15)',
+                status: 'agreed',
             });
             expect(status).toBe(200);
-            expect(data.type).toBe('revise');
-            expect(data.from).toBe('ada');
-            expect(data.explanation).toBe('need tool first');
+            expect(data.status).toBe('recorded');
         });
 
-        it('rejects missing originalProposal', async () => {
-            const { status } = await post('/api/protocol/revise', {
+        it('rejects invalid commitment payload', async () => {
+            const { status } = await post('/api/npc/commitment', {
                 npcId: 'ada',
-                question: { kind: 'a', concern: 'b', evidence: 'c' },
-                worldSummary: 'forest',
-            });
-            expect(status).toBe(400);
-        });
-
-        it('rejects missing question', async () => {
-            const { status } = await post('/api/protocol/revise', {
-                npcId: 'ada',
-                originalProposal: { taskDescription: 'a', interpretation: 'b', subTasks: [], completionCriteria: 'c' },
-                worldSummary: 'forest',
-            });
-            expect(status).toBe(400);
-        });
-    });
-
-    describe('POST /api/protocol/remember', () => {
-        it('returns lessons on success', async () => {
-            mockEnqueue.mockResolvedValueOnce({
-                content: [{ type: 'text', text: JSON.stringify({
-                    lessons: [
-                        { insight: 'axes help', condition: 'gathering wood', confidence: 0.9 },
-                    ],
-                }) }],
-            });
-
-            const { status, data } = await post('/api/protocol/remember', {
-                npcId: 'ada',
-                taskContext: 'gathered wood in forest',
-                outcome: 'success after finding axe',
-            });
-            expect(status).toBe(200);
-            expect(data.type).toBe('remember');
-            expect(data.from).toBe('ada');
-            expect(data.lessons).toHaveLength(1);
-            expect(data.lessons[0].insight).toBe('axes help');
-        });
-
-        it('rejects missing taskContext', async () => {
-            const { status } = await post('/api/protocol/remember', {
-                npcId: 'ada',
-                outcome: 'success',
-            });
-            expect(status).toBe(400);
-        });
-
-        it('rejects missing outcome', async () => {
-            const { status } = await post('/api/protocol/remember', {
-                npcId: 'ada',
-                taskContext: 'gathered wood',
+                from: 'Ada',
             });
             expect(status).toBe(400);
         });

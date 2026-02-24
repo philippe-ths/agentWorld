@@ -1,5 +1,5 @@
 import type { LogEntry } from './EventLog';
-import { getEntries, exportLog } from './EventLog';
+import { getEntries } from './EventLog';
 import type { EntityManager } from '../entities/EntityManager';
 import { NPC } from '../entities/NPC';
 
@@ -25,18 +25,6 @@ export class LogPanel {
 
         document.getElementById('log-toggle')!.addEventListener('click', () => {
             this.panel.classList.toggle('collapsed');
-        });
-
-        document.getElementById('log-download')?.addEventListener('click', () => {
-            const text = exportLog();
-            const blob = new Blob([text], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            a.href = url;
-            a.download = `agentworld-log-${ts}.log`;
-            a.click();
-            URL.revokeObjectURL(url);
         });
 
         // Wire NPC selector buttons
@@ -93,7 +81,7 @@ export class LogPanel {
         el.className = `log-entry log-${entry.type}`;
 
         const time = new Date(entry.timestamp);
-        const ts = `${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}.${padMs(time.getMilliseconds())}`;
+        const ts = `${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
 
         const actorColor = NPC_COLORS[entry.npcId ?? ''] ?? '#ccc';
 
@@ -131,12 +119,6 @@ export class LogPanel {
 
             case 'system':
                 return `${time} ${actor} <span class="log-icon">⚙️</span> <span class="log-msg log-system-text">${esc(entry.message)}</span>`;
-
-            case 'protocol':
-                return `${time} ${actor} <span class="log-icon">📋</span> <span class="log-msg log-protocol-text">${esc(entry.message)}</span>`;
-
-            case 'server':
-                return `${time} ${actor} <span class="log-icon">🖥️</span> <span class="log-msg log-server-text">${esc(entry.message)}</span>`;
 
             default: // 'action'
                 return `${time} ${actor} <span class="log-msg">${esc(entry.message)}</span>`;
@@ -176,12 +158,6 @@ export class LogPanel {
 
 function pad(n: number): string {
     return n < 10 ? '0' + n : String(n);
-}
-
-function padMs(n: number): string {
-    if (n < 10) return '00' + n;
-    if (n < 100) return '0' + n;
-    return String(n);
 }
 
 function esc(s: string): string {

@@ -54,7 +54,7 @@ Open `http://localhost:8080` in your browser.
 cd server && npm test
 ```
 
-Runs 74 tests across 6 suites with Vitest.
+Runs 72 tests across 7 suites with Vitest.
 
 ## Build for Production
 

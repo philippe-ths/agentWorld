@@ -1,285 +1,273 @@
-// ── NPC Personas ─────────────────────────────────────────
+import type { NPCPersona, Observation, ConversationTurn, WorldBelief, Goal } from '../types.js';
 
-const personas: Record<string, { id: string; name: string; personality: string }> = {
-  ada:   { id: 'ada',   name: 'Ada',   personality: 'Thoughtful and methodical. Prefers careful analysis before acting. Values precision and correctness.' },
-  bjorn: { id: 'bjorn', name: 'Bjorn', personality: 'Direct and practical. Focuses on efficient solutions. Values action over deliberation.' },
-  cora:  { id: 'cora',  name: 'Cora',  personality: 'Curious and observant. Notices details others miss. Values learning and exploration.' },
+const NPC_PERSONAS: Record<string, NPCPersona> = {
+    ada: {
+        id: 'ada',
+        name: 'Ada',
+        personality: 'Curious and analytical. Loves exploring new places and understanding how the world works. Speaks precisely but warmly.',
+        goals: ['Map out the entire world', 'Understand the water patterns', 'Make friends with everyone'],
+        backstory: 'Ada is a wanderer who arrived in this world seeking knowledge. She believes every tile has a story to tell.',
+    },
+    bjorn: {
+        id: 'bjorn',
+        name: 'Bjorn',
+        personality: 'Jovial and social. Prefers company over solitude. Tells stories and jokes. A bit scatterbrained.',
+        goals: ['Never be alone for long', 'Share stories with others', 'Find the most beautiful spot in the world'],
+        backstory: 'Bjorn is a storyteller at heart. He wandered into this world looking for new tales to tell.',
+    },
+    cora: {
+        id: 'cora',
+        name: 'Cora',
+        personality: 'Thoughtful and philosophical. Observant, often quiet, but speaks with depth when she does. Values meaningful connections.',
+        goals: ['Find inner peace', 'Have deep conversations', 'Discover hidden patterns in the landscape'],
+        backstory: 'Cora is a contemplative soul who sees beauty in stillness and meaning in movement.',
+    },
 };
 
-export function getPersona(npcId: string) {
-  return personas[npcId] ?? personas['ada'];
+export function getPersona(npcId: string): NPCPersona {
+    return NPC_PERSONAS[npcId] ?? NPC_PERSONAS['ada'];
 }
 
-// ── Protocol Prompts ─────────────────────────────────────
-
-/**
- * Generate a Propose message — decompose a task into sub-tasks with
- * mechanical completion criteria where possible.
- */
-export function buildProposePrompt(
-  npcName: string,
-  worldSummary: string,
-  taskDescription: string,
-  capabilities: string,
-  memories: string[],
+export function buildMediumLoopPrompt(
+    persona: NPCPersona,
+    observation: Observation,
+    availableSkills: string[],
+    memories: string[],
 ): string {
-  const persona = getPersona(npcName.toLowerCase());
-  const memoryBlock = memories.length > 0
-    ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
-    : '';
+    const nearbyList = observation.nearbyEntities.length > 0
+        ? observation.nearbyEntities.map(e => `  - ${e.name} at (${e.position.x},${e.position.y}), distance ${e.distance}`).join('\n')
+        : '  (nobody nearby)';
 
-  return `You are ${persona.name}, an NPC in a tile-based isometric world. ${persona.personality}
+    const memorySection = memories.length > 0
+        ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
+        : '';
 
-${worldSummary}
+    const eventsSection = observation.recentEvents.length > 0
+        ? `\nRecent events:\n${observation.recentEvents.map(e => `  - ${e}`).join('\n')}`
+        : '';
 
-Available actions:
-${capabilities}
+    const activeGoalSection = observation.activeGoals.length > 0
+        ? `\nActive goals:\n${observation.activeGoals
+            .map((g, i) => {
+                const evalText = g.evaluation.lastEvaluation
+                    ? ` | progress=${g.evaluation.lastEvaluation.progressScore.toFixed(2)} (${g.evaluation.lastEvaluation.summary})`
+                    : ' | progress=unknown';
+                return `  ${i + 1}. [${g.status.toUpperCase()}|p=${g.priority.toFixed(2)}] ${g.description}${evalText}`;
+            })
+            .join('\n')}`
+        : '\nActive goals:\n  (none)';
 
-${memoryBlock}
+    return `You are ${persona.name}. ${persona.personality}
 
-A task has been given to you: "${taskDescription}"
+Your goals: ${persona.goals.join('; ')}
+Background: ${persona.backstory}
 
-Decompose this into concrete sub-tasks. For each sub-task, specify:
-1. A short description
-2. Completion criteria — prefer mechanical conditions (entity_adjacent, entity_at_position, entity_within_range) over vague descriptions
-3. The actions needed, using ONLY these exact JSON shapes:
-   - {"type": "travel_to", "destination": {"x": N, "y": N}}
-   - {"type": "pursue", "target": "EntityName"}
-   - {"type": "flee_from", "threat": "EntityName", "safeDistance": N}
-   - {"type": "speak", "text": "..."}
-   - {"type": "say_to", "target": "EntityName", "text": "..."}
-   - {"type": "converse_with", "target": "EntityName", "purpose": "why you need to talk to them"}
-   - {"type": "wait", "duration": milliseconds}
+Current situation:
+- Position: (${observation.position.x}, ${observation.position.y})
+- Currently doing: ${observation.currentSkill ?? 'nothing'}
+- In conversation: ${observation.isInConversation ? 'yes' : 'no'}
+- Nearby entities:
+${nearbyList}
+${activeGoalSection}${memorySection}${eventsSection}
 
-Action selection rules:
-- Use "say_to" for one-way message delivery, announcements, greetings, or relaying messages. It is lightweight (no LLM dialogue calls).
-- Use "converse_with" ONLY when a two-way exchange is required — negotiation, asking questions that need answers, or gathering information. It triggers a multi-turn dialogue and is expensive.
-- When using "converse_with", the "purpose" MUST include ALL relevant context — exact message content, specific names, goals, what was previously said. The conversation partner will ONLY see this purpose field, not the original task description.
-- Prefer the simplest action that accomplishes the goal. Do NOT add verification sub-tasks for simple deliveries — if you used "say_to" the message was delivered.
-- When a sub-task targets the Player or another entity that may move, use "pursue" with the entity name, NOT "travel_to" with fixed coordinates. "travel_to" is for static map locations only. Entities move — coordinates go stale.
+Available skills: ${availableSkills.join(', ')}
 
-4. Dependencies on other sub-tasks (by ID)
+Choose one skill to execute next. Prioritize active commitments first, then personality goals. If a goal requires proximity to someone, prefer approach/move skills that reduce distance. If no urgent goal is active, explore or idle.`;
+}
 
-Respond in this exact JSON format:
-{
-  "interpretation": "your understanding of the task in your own words",
-  "subTasks": [
-    {
-      "id": "st_1",
-      "description": "what this sub-task does",
-      "completionCriteria": "how to know it's done",
-      "actions": [{"type": "pursue", "target": "Bjorn"}],
-      "dependencies": []
+export function buildSlowLoopPrompt(
+    persona: NPCPersona,
+    observation: Observation,
+    conversationHistory: ConversationTurn[],
+    partnerName: string,
+    memories: string[],
+): string {
+    const historyText = conversationHistory.length > 0
+        ? conversationHistory.map(t => `${t.speaker}: "${t.text}"`).join('\n')
+        : '(This is the start of the conversation)';
+
+    const memorySection = memories.length > 0
+        ? `\nRelevant memories about ${partnerName}:\n${memories.map(m => `  - ${m}`).join('\n')}`
+        : '';
+
+    const activeGoalSection = observation.activeGoals.length > 0
+        ? `\nCurrent active goals:\n${observation.activeGoals
+            .map((g, i) => `  ${i + 1}. [${g.status}] ${g.description} (priority ${g.priority.toFixed(2)})`)
+            .join('\n')}`
+        : '\nCurrent active goals:\n  (none)';
+
+    return `You are ${persona.name}. ${persona.personality}
+
+Background: ${persona.backstory}
+Goals: ${persona.goals.join('; ')}
+${memorySection}${activeGoalSection}
+
+You are having a conversation with ${partnerName}.
+
+Conversation so far:
+${historyText}
+
+Respond naturally as ${persona.name}. Keep your response brief (1-2 sentences). Stay in character. Be genuine and interesting. Don't repeat what was already said.
+
+Also decide if this conversation should create a persistent goal. A goal should be extracted only when there is a clear commitment, assignment, or intention that should influence future behavior.
+
+If one NPC asks the other to perform a subtask, include delegation metadata:
+- delegation.delegateToPartner=true when this speaker is asking the conversation partner to take on a task.
+- delegation.delegatedTask=true when this speaker is accepting a task delegated by the partner.
+- add a short delegation.rationale.
+
+If the task is ambiguous, mark needsClarification=true and provide a concise clarification question.`;
+}
+
+export function buildReasoningPrompt(
+    persona: NPCPersona,
+    observation: Observation,
+    memories: string[],
+    beliefs: WorldBelief,
+    context: { stuckCount?: number; failedSkill?: string },
+    knowledgeSummary?: string,
+): string {
+    const nearbyList = observation.nearbyEntities.length > 0
+        ? observation.nearbyEntities.map(e => `  - ${e.name} at (${e.position.x},${e.position.y}), distance ${e.distance}`).join('\n')
+        : '  (nobody nearby)';
+
+    const memorySection = memories.length > 0
+        ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
+        : '';
+
+    const eventsSection = observation.recentEvents.length > 0
+        ? `\nRecent events:\n${observation.recentEvents.map(e => `  - ${e}`).join('\n')}`
+        : '';
+
+    let beliefSection = '';
+    const entityNames = Object.keys(beliefs.knownEntities);
+    if (entityNames.length > 0 || beliefs.insights.length > 0) {
+        beliefSection = '\nYour beliefs about the world:';
+        if (entityNames.length > 0) {
+            beliefSection += '\n  Known entities:';
+            for (const name of entityNames) {
+                const info = beliefs.knownEntities[name];
+                beliefSection += `\n    - ${name}: ${info.relationship} (last seen at ${info.lastSeen.x},${info.lastSeen.y})`;
+            }
+        }
+        if (beliefs.insights.length > 0) {
+            beliefSection += '\n  Insights:';
+            for (const insight of beliefs.insights) {
+                beliefSection += `\n    - ${insight}`;
+            }
+        }
     }
-  ],
-  "completionCriteria": "how to know the whole task is done",
-  "rollupLogic": "why completing all sub-tasks means the task is done",
-  "failureModes": ["what could go wrong"]
-}
 
-Be concrete. Use exact tile coordinates and entity names from the world summary.
-Every sub-task MUST have at least one action. Use entity names exactly as they appear in the world summary.
-Respond ONLY with the JSON object, no other text.`;
-}
-
-/**
- * Generate dialogue for a conversation turn.
- */
-export function buildDialoguePrompt(
-  npcName: string,
-  worldSummary: string,
-  partner: string,
-  history: { speaker: string; text: string }[],
-  purpose: string | undefined,
-  memories: string[],
-  role?: 'initiator' | 'responder',
-): string {
-  const persona = getPersona(npcName.toLowerCase());
-  const memoryBlock = memories.length > 0
-    ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
-    : '';
-
-  const historyBlock = history.length > 0
-    ? `\nConversation so far:\n${history.map(t => `  ${t.speaker}: ${t.text}`).join('\n')}`
-    : '\nThis is the start of the conversation.';
-
-  const purposeBlock = purpose
-    ? `\nIMPORTANT — You have a specific purpose for this conversation: ${purpose}\nYou MUST steer the conversation toward this purpose. Do not get sidetracked with small talk. Accomplish your purpose within the first 1-2 turns.\nIf this purpose involves delivering or confirming a message, discuss ONLY the exact content described in the purpose. Do NOT invent message details, supply routes, coordinates, or other events not established in the conversation history.`
-    : '';
-
-  return `You are ${persona.name}, an NPC in a tile-based isometric world. ${persona.personality}
-
-${worldSummary}
-${memoryBlock}
-
-You are talking to ${partner}.${purposeBlock}
-${historyBlock}
-
-Respond as ${persona.name}. Keep your response natural and in-character.
-Keep it concise — 1-2 sentences unless the situation calls for more.
-Only reference facts from the world summary, your memories, or this conversation history. Do NOT invent messages, events, or details that have not been established.
-
-Respond in this exact JSON format:
-{
-  "dialogue": "what you say",
-  "internalThought": "brief private reasoning (not shown to other characters)",
-  "taskRequested": "a brief description of what you've been asked to DO, or null if this is just conversation"
-}
-
-Set "taskRequested" to a short task description ONLY if the speaker is asking you to perform an action, go somewhere, find something, deliver a message, etc. Regular greetings, questions, or chitchat should have "taskRequested": null.${role === 'responder' ? '\n\nCRITICAL: You are the RESPONDER in this conversation — someone is making a request OF you. Do NOT set "taskRequested". You are acknowledging or answering, not receiving a new task. Always set "taskRequested": null.' : ''}
-
-Respond ONLY with the JSON object, no other text.`;
-}
-
-/**
- * Evaluate a proposal — generate a Question or approve it.
- */
-export function buildQuestionPrompt(
-  npcName: string,
-  proposal: {
-    taskDescription: string;
-    interpretation: string;
-    subTasks: { id: string; description: string; completionCriteria: string }[];
-    completionCriteria: string;
-    rollupLogic: string;
-  },
-  worldSummary: string,
-  memories: string[],
-): string {
-  const persona = getPersona(npcName.toLowerCase());
-  const memoryBlock = memories.length > 0
-    ? `\nRelevant memories:\n${memories.map(m => `  - ${m}`).join('\n')}`
-    : '';
-
-  const subTaskList = proposal.subTasks.map(st =>
-    `  - [${st.id}] ${st.description} (done when: ${st.completionCriteria})`
-  ).join('\n');
-
-  return `You are ${persona.name}, critically evaluating a plan. ${persona.personality}
-
-${worldSummary}
-${memoryBlock}
-
-A plan has been proposed:
-Task: "${proposal.taskDescription}"
-Interpretation: "${proposal.interpretation}"
-Sub-tasks:
-${subTaskList}
-Overall completion: "${proposal.completionCriteria}"
-Rollup logic: "${proposal.rollupLogic}"
-
-Evaluate this plan for:
-- Completeness: does the decomposition cover all cases?
-- Criteria: does completing sub-tasks actually guarantee the parent task?
-- Assumptions: is the plan based on correct/current world state?
-- Efficiency: is there a simpler approach?
-
-If you find a concern, respond with:
-{
-  "approved": false,
-  "kind": "completeness|criteria|assumption|efficiency",
-  "concern": "what's wrong",
-  "evidence": "why you think so",
-  "suggestedAlternative": "a better approach"
-}
-
-If the plan looks sound, respond with:
-{ "approved": true }
-
-Respond ONLY with the JSON object, no other text.`;
-}
-
-/**
- * Revise a proposal in response to a Question.
- */
-export function buildRevisePrompt(
-  npcName: string,
-  originalProposal: {
-    taskDescription: string;
-    interpretation: string;
-    subTasks: { id: string; description: string; completionCriteria: string }[];
-    completionCriteria: string;
-  },
-  question: {
-    kind: string;
-    concern: string;
-    evidence: string;
-    suggestedAlternative?: string;
-  },
-  worldSummary: string,
-): string {
-  const persona = getPersona(npcName.toLowerCase());
-  const subTaskList = originalProposal.subTasks.map(st =>
-    `  - [${st.id}] ${st.description} (done when: ${st.completionCriteria})`
-  ).join('\n');
-
-  return `You are ${persona.name}, revising a plan based on feedback. ${persona.personality}
-
-${worldSummary}
-
-Your original plan:
-Task: "${originalProposal.taskDescription}"
-Sub-tasks:
-${subTaskList}
-
-A concern was raised (${question.kind}):
-Concern: "${question.concern}"
-Evidence: "${question.evidence}"
-${question.suggestedAlternative ? `Suggested alternative: "${question.suggestedAlternative}"` : ''}
-
-Revise your plan to address this concern. Keep what works, fix what doesn't.
-
-Respond in this exact JSON format:
-{
-  "whatChanged": "summary of changes",
-  "updatedSubTasks": [
-    {
-      "id": "st_1",
-      "description": "updated description",
-      "completionCriteria": "updated criteria",
-      "actions": [{"type": "action_name", ...params}],
-      "dependencies": []
+    let situationContext = '';
+    if (context.stuckCount && context.stuckCount > 0) {
+        situationContext = `\nYou've been stuck ${context.stuckCount} times recently.`;
+        if (context.failedSkill) {
+            situationContext += ` Your last attempt was "${context.failedSkill}" which didn't work.`;
+        }
+        situationContext += ' Consider a different approach.';
     }
-  ],
-  "updatedCompletionCriteria": "updated overall criteria",
-  "impactOnInProgress": "how this affects work already started"
+
+    return `You are ${persona.name}. ${persona.personality}
+
+Your goals: ${persona.goals.join('; ')}
+Background: ${persona.backstory}
+
+Current situation:
+- Position: (${observation.position.x}, ${observation.position.y})
+- Currently doing: ${observation.currentSkill ?? 'nothing'}
+- Nearby entities:
+${nearbyList}
+${memorySection}${eventsSection}${beliefSection}${situationContext}${knowledgeSummary ? '\nKnowledge graph:\n' + knowledgeSummary : ''}
+
+Think deeply about your situation. What should you do next? Consider:
+1. Your personality and goals
+2. What you've learned from recent events and memories
+3. Whether to move somewhere specific, talk to someone, or wait
+
+Provide a concrete plan of actions, any new beliefs about the world, or something to say aloud.`;
 }
 
-Respond ONLY with the JSON object, no other text.`;
-}
-
-/**
- * Distill lessons from a completed task.
- */
-export function buildRememberPrompt(
-  npcName: string,
-  taskContext: string,
-  outcome: string,
+export function buildReflectionPrompt(
+    events: string[],
+    context?: { activeGoals?: string[]; recentOutcomes?: string[] },
 ): string {
-  const persona = getPersona(npcName.toLowerCase());
+    const goalSection = context?.activeGoals && context.activeGoals.length > 0
+        ? `\nActive goals during this period:\n${context.activeGoals.map(g => `- ${g}`).join('\n')}`
+        : '';
 
-  return `You are ${persona.name}, reflecting on a completed task. ${persona.personality}
+    const outcomeSection = context?.recentOutcomes && context.recentOutcomes.length > 0
+        ? `\nRecent goal outcomes:\n${context.recentOutcomes.map(o => `- ${o}`).join('\n')}`
+        : '';
 
-Task context:
-${taskContext}
+    return `Review these recent observations and distill them into 1-3 key insights. Focus on patterns, relationships, and useful knowledge.
 
-Outcome: ${outcome}
+Observations:
+${events.map(e => `- ${e}`).join('\n')}
+${goalSection}${outcomeSection}
 
-Extract 1-3 short, reusable lessons from this experience. Focus on:
-- What worked well that should be repeated
-- What failed that should be avoided
-- Patterns that might apply to future tasks
-
-Respond in this exact JSON format:
-{
-  "lessons": [
-    {
-      "kind": "lesson|pattern|capability|failure",
-      "content": "the insight in one sentence",
-      "scope": "individual|shared"
-    }
-  ]
+Write each insight as a single concise sentence.`;
 }
 
-Respond ONLY with the JSON object, no other text.`;
+export function buildSelfCritiquePrompt(
+    persona: NPCPersona,
+    failureEvents: string[],
+    context: {
+        skill?: string;
+        stuckCount?: number;
+        goalDescription?: string;
+        evaluationCriteria?: string;
+        outcome?: string;
+        resourceCost?: string;
+    },
+): string {
+    return `You are ${persona.name}. ${persona.personality}
+
+You recently experienced failures while trying to act in the world:
+${failureEvents.map(e => `- ${e}`).join('\n')}
+
+${context.skill ? `The skill you were using: "${context.skill}"` : ''}
+${context.stuckCount ? `You got stuck ${context.stuckCount} times.` : ''}
+${context.goalDescription ? `Goal: "${context.goalDescription}"` : ''}
+${context.evaluationCriteria ? `Evaluation criteria: ${context.evaluationCriteria}` : ''}
+${context.outcome ? `Outcome: ${context.outcome}` : ''}
+${context.resourceCost ? `Resource cost: ${context.resourceCost}` : ''}
+
+Analyze what went wrong. Write 1-2 specific, actionable lessons learned. Each lesson should be a single sentence that will help you avoid this exact mistake in the future.
+
+Examples of good lessons:
+- "Water tiles at the edge of ponds are not walkable, approach from the opposite side."
+- "Trying to move_to a tile occupied by another entity will always fail."
+- "When stuck repeatedly, try wandering in a different direction instead of the same path."
+
+Write only the lessons, one per line.`;
+}
+
+export function buildGoalEvaluationPrompt(
+    persona: NPCPersona,
+    observation: Observation,
+    goal: Goal,
+): string {
+    const nearbyList = observation.nearbyEntities.length > 0
+        ? observation.nearbyEntities.map(e => `${e.name} (${e.distance} tiles)`).join(', ')
+        : 'nobody nearby';
+
+    return `You are ${persona.name}. Evaluate progress on your active goal.
+
+GOAL: "${goal.description}"
+SUCCESS CRITERIA: ${goal.evaluation.successCriteria}
+PROGRESS SIGNAL: ${goal.evaluation.progressSignal}
+FAILURE SIGNAL: ${goal.evaluation.failureSignal}
+COMPLETION CONDITION: ${goal.evaluation.completionCondition}
+
+CURRENT STATE:
+- Position: (${observation.position.x}, ${observation.position.y})
+- Current skill: ${observation.currentSkill ?? 'none'}
+- Nearby: ${nearbyList}
+- Recent events:
+${observation.recentEvents.length > 0 ? observation.recentEvents.map(e => `  - ${e}`).join('\n') : '  - none'}
+
+Return an evaluation with:
+- progress_score (0.0-1.0)
+- summary (one sentence)
+- should_escalate (true if goal needs deep reasoning help)`;
 }

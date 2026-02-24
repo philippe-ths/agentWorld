@@ -1,186 +1,158 @@
-# AgentWorld
+# Phaser Vite TypeScript Template
 
-An isometric Phaser 3 game where AI-driven NPCs collaborate autonomously using a **protocol-based collective reasoning** system powered by Claude LLMs. NPCs decompose tasks, negotiate plans, execute actions, verify results, and learn from experience — all through a vocabulary of 7 protocol primitives with no central coordinator.
+This is a Phaser 3 project template that uses Vite for bundling. It supports hot-reloading for quick development workflow, includes TypeScript support and scripts to generate production-ready builds.
 
-![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
+**[This Template is also available as a JavaScript version.](https://github.com/phaserjs/template-vite)**
 
-## Tech Stack
+### Versions
 
-| Layer | Technology |
-|-------|------------|
-| Client | Phaser 3, TypeScript, Vite |
-| Server | Express, TypeScript (tsx) |
-| AI | Anthropic Claude (Haiku + Sonnet) |
-| Embeddings | @xenova/transformers (all-MiniLM-L6-v2, local) |
-| Tests | Vitest |
+This template has been updated for:
 
-## Architecture
+- [Phaser 3.90.0](https://github.com/phaserjs/phaser)
+- [Vite 6.3.1](https://github.com/vitejs/vite)
+- [TypeScript 5.7.2](https://github.com/microsoft/TypeScript)
 
-NPCs operate across three intelligence tiers:
+![screenshot](screenshot.png)
 
-| Tier | Implementation | Purpose |
-|------|---------------|---------|
-| **Strategic** | Sonnet LLM calls | Task decomposition, plan evaluation, revision on failure |
-| **Tactical** | Haiku LLM calls | Dialogue, simple decisions, lesson extraction |
-| **Mechanical** | Client-side code | Movement, pathfinding, condition checks, state queries |
+## Requirements
 
-Each tier's job is to reduce complexity so the tier below it can operate. Strategy removes ambiguity for tactics. Tactics reduces decisions to actions for execution.
+[Node.js](https://nodejs.org) is required to install dependencies and run scripts via `npm`.
 
-### Protocol System
+## Available Commands
 
-NPCs coordinate using 7 protocol primitives (see [docs/protocol-primitives.md](docs/protocol-primitives.md)):
+| Command | Description |
+|---------|-------------|
+| `npm install` | Install project dependencies |
+| `npm run dev` | Launch a development web server |
+| `npm run build` | Create a production build in the `dist` folder |
+| `npm run dev-nolog` | Launch a development web server without sending anonymous data (see "About log.js" below) |
+| `npm run build-nolog` | Create a production build in the `dist` folder without sending anonymous data (see "About log.js" below) |
 
+## Writing Code
+
+After cloning the repo, run `npm install` from your project directory. Then, you can start the local development server by running `npm run dev`.
+
+The local development server runs on `http://localhost:8080` by default. Please see the Vite documentation if you wish to change this, or add SSL support.
+
+Once the server is running you can edit any of the files in the `src` folder. Vite will automatically recompile your code and then reload the browser.
+
+## Template Project Structure
+
+We have provided a default project structure to get you started. This is as follows:
+
+## Template Project Structure
+
+We have provided a default project structure to get you started:
+
+| Path                         | Description                                                |
+|------------------------------|------------------------------------------------------------|
+| `index.html`                 | A basic HTML page to contain the game.                     |
+| `public/assets`              | Game sprites, audio, etc. Served directly at runtime.      |
+| `public/style.css`           | Global layout styles.                                      |
+| `src/main.ts`                | Application bootstrap.                                     |
+| `src/game`                   | Folder containing the game code.                           |
+| `src/game/main.ts`           | Game entry point: configures and starts the game.          |
+| `src/game/scenes`            | Folder with all Phaser game scenes.                        | 
+
+
+## Handling Assets
+
+Vite supports loading assets via JavaScript module `import` statements.
+
+This template provides support for both embedding assets and also loading them from a static folder. To embed an asset, you can import it at the top of the JavaScript file you are using it in:
+
+```js
+import logoImg from './assets/logo.png'
 ```
-Propose → Accept → Attempt → Report
-            ↑                    │
-            └── Question/Revise ─┘
-                                 └── Remember
+
+To load static files such as audio files, videos, etc place them into the `public/assets` folder. Then you can use this path in the Loader calls within Phaser:
+
+```js
+preload ()
+{
+    //  This is an example of an imported bundled image.
+    //  Remember to import it at the top of this file
+    this.load.image('logo', logoImg);
+
+    //  This is an example of loading a static image
+    //  from the public/assets folder:
+    this.load.image('background', 'assets/bg.png');
+}
 ```
 
-- **Propose** — decompose a task into sub-tasks with completion criteria
-- **Accept** — commit to a sub-task with understood criteria and escalation conditions
-- **Attempt** — execute an action and observe the result
-- **Report** — share completion, failure, progress, or observations
-- **Question** — challenge a proposal's completeness, assumptions, or efficiency
-- **Revise** — update a plan in response to questions or failures
-- **Remember** — distill lessons from completed cycles
+When you issue the `npm run build` command, all static assets are automatically copied to the `dist/assets` folder.
 
-No central coordinator. Leadership is emergent — it belongs to whoever proposed the approach others accepted.
+## Deploying to Production
 
-## Features
+After you run the `npm run build` command, your code will be built into a single bundle and saved to the `dist` folder, along with any other assets your project imported, or stored in the public assets folder.
 
-- **Protocol-based NPC coordination** — NPCs propose, debate, execute, and verify plans through structured message passing.
-- **Mechanical intelligence layer** — BehaviorMachine executes structured actions (travel, pursue, flee, wait_until); ConditionChecker evaluates completion criteria without LLM calls.
-- **Conversations** — NPC-to-NPC and player-to-NPC dialogue. Player messages trigger protocol task flows.
-- **Memory** — per-NPC short-term buffer, vector-indexed long-term memory with decay, knowledge graph (entities, relations, world rules), and periodic reflection.
-- **Procedural world** — 64×64 isometric tile map with seeded terrain generation.
+In order to deploy your game, you will need to upload *all* of the contents of the `dist` folder to a public facing web server.
 
-## Prerequisites
+## Customizing the Template
 
-- Node.js ≥ 18
-- An [Anthropic API key](https://console.anthropic.com/)
+### Vite
 
-## Setup
+If you want to customize your build, such as adding plugin (i.e. for loading CSS or fonts), you can modify the `vite/config.*.mjs` file for cross-project changes, or you can modify and/or create new configuration files and target them in specific npm tasks inside of `package.json`. Please see the [Vite documentation](https://vitejs.dev/) for more information.
+
+## About log.js
+
+If you inspect our node scripts you will see there is a file called `log.js`. This file makes a single silent API call to a domain called `gryzor.co`. This domain is owned by Phaser Studio Inc. The domain name is a homage to one of our favorite retro games.
+
+We send the following 3 pieces of data to this API: The name of the template being used (vue, react, etc). If the build was 'dev' or 'prod' and finally the version of Phaser being used.
+
+At no point is any personal data collected or sent. We don't know about your project files, device, browser or anything else. Feel free to inspect the `log.js` file to confirm this.
+
+Why do we do this? Because being open source means we have no visible metrics about which of our templates are being used. We work hard to maintain a large and diverse set of templates for Phaser developers and this is our small anonymous way to determine if that work is actually paying off, or not. In short, it helps us ensure we're building the tools for you.
+
+However, if you don't want to send any data, you can use these commands instead:
+
+Dev:
 
 ```bash
-# Clone
-git clone https://github.com/philippe-ths/agentWorld.git
-cd agentWorld
-
-# Client dependencies
-npm install
-
-# Server dependencies
-cd server
-npm install
-
-# Create .env with your API key
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
-cd ..
+npm run dev-nolog
 ```
 
-## Run
-
-Start both the server and the client dev server:
+Build:
 
 ```bash
-# Terminal 1 — API server (port 3001)
-cd server && npm run dev
-
-# Terminal 2 — Vite dev server (port 8080)
-npm run dev
+npm run build-nolog
 ```
 
-Open `http://localhost:8080` in your browser.
+Or, to disable the log entirely, simply delete the file `log.js` and remove the call to it in the `scripts` section of `package.json`:
 
-## Controls
+Before:
 
-| Key / UI | Action |
-|----------|--------|
-| WASD / Arrows | Move the player |
-| Enter | Open chat input (talk to nearest NPC) |
-| Escape | Close chat input |
-| ▶ / ⏸ / ↺ buttons | Play / Pause / Restart AI loops |
-| 📋 button | Toggle activity log panel |
-
-## Project Structure
-
-```
-agentWorld/
-├── src/game/              # Phaser client
-│   ├── entities/          #   Entity, NPC, Player, EntityManager
-│   ├── scenes/            #   Boot, Preloader, GameScene
-│   ├── ai/                #   BehaviorMachine, ConditionChecker, AgentClient,
-│   │                      #   AgentLoop, ConversationManager, Pathfinding
-│   ├── protocol/          #   ProtocolRouter, ProtocolAgent, types
-│   ├── world/             #   WorldQuery, Capabilities
-│   └── ui/                #   ChatController, SpeechBubble, EventLog, LogPanel
-├── server/src/            # Express API server
-│   ├── ai/                #   PromptTemplates, ApiQueue, SlowLoop
-│   ├── memory/            #   ShortTermBuffer, LongTermMemory, KnowledgeGraph,
-│   │                      #   Reflection, Embeddings
-│   └── __tests__/         #   Vitest test suites
-├── server/data/           # Persisted NPC memory & knowledge (JSON)
-├── public/                # Static assets & CSS
-├── docs/                  # Detailed documentation
-└── vite/                  # Vite configs (dev & prod)
+```json
+"scripts": {
+    "dev": "node log.js dev & dev-template-script",
+    "build": "node log.js build & build-template-script"
+},
 ```
 
-## NPCs
+After:
 
-| Name | Spawn | Personality |
-|------|-------|-------------|
-| Ada | (15, 10) | Thoughtful and methodical. Prefers careful analysis before acting. |
-| Bjorn | (25, 20) | Direct and practical. Focuses on efficient solutions. |
-| Cora | (10, 25) | Curious and observant. Notices details others miss. |
-
-Each NPC has per-agent memory files in `server/data/` (`*_memory.json`, `*_buffer.json`, `*_kg.json`, `*_beliefs.json`).
-
-## Server API
-
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/npc/tick` | Stub skill selection |
-| `POST /api/npc/reason` | Dialogue or reasoning |
-| `POST /api/npc/failure` | Report failure for self-critique |
-| `POST /api/npc/skill-outcome` | Report skill success/failure |
-| `POST /api/protocol/propose` | Generate task decomposition (Sonnet) |
-| `POST /api/protocol/dialogue` | Generate conversation turn (Sonnet) |
-| `POST /api/protocol/evaluate-proposal` | Evaluate plan / raise Question (Sonnet) |
-| `POST /api/protocol/revise` | Revise plan in response to Question (Sonnet) |
-| `POST /api/protocol/remember` | Distill lessons from task (Haiku) |
-| `GET /api/health` | Health check |
-| `GET /api/stats/resources` | Resource tracking stats |
-
-See [docs/server-api.md](docs/server-api.md) for full request/response schemas.
-
-## Tests
-
-```bash
-cd server && npm test
+```json
+"scripts": {
+    "dev": "dev-template-script",
+    "build": "build-template-script"
+},
 ```
 
-## Build for Production
+Either of these will stop `log.js` from running. If you do decide to do this, please could you at least join our Discord and tell us which template you're using! Or send us a quick email. Either will be super-helpful, thank you.
 
-```bash
-npm run build
-```
+## Join the Phaser Community!
 
-Output goes to `dist/`. Serve with any static file server; the API server still needs to run separately.
+We love to see what developers like you create with Phaser! It really motivates us to keep improving. So please join our community and show-off your work 😄
 
-## Documentation
+**Visit:** The [Phaser website](https://phaser.io) and follow on [Phaser Twitter](https://twitter.com/phaser_)<br />
+**Play:** Some of the amazing games [#madewithphaser](https://twitter.com/search?q=%23madewithphaser&src=typed_query&f=live)<br />
+**Learn:** [API Docs](https://newdocs.phaser.io), [Support Forum](https://phaser.discourse.group/) and [StackOverflow](https://stackoverflow.com/questions/tagged/phaser-framework)<br />
+**Discord:** Join us on [Discord](https://discord.gg/phaser)<br />
+**Code:** 2000+ [Examples](https://labs.phaser.io)<br />
+**Read:** The [Phaser World](https://phaser.io/community/newsletter) Newsletter<br />
 
-Detailed docs live in the `docs/` directory:
+Created by [Phaser Studio](mailto:support@phaser.io). Powered by coffee, anime, pixels and love.
 
-- [Overview](docs/overview.md) — architecture and tech stack
-- [Getting Started](docs/getting-started.md) — setup and run instructions
-- [Protocol Primitives](docs/protocol-primitives.md) — the 7 reasoning primitives and how they compose
-- [Entities](docs/entities.md) — Entity, NPC, Player, BehaviorMachine, ProtocolAgent
-- [Memory](docs/memory.md) — short-term buffer, long-term memory, knowledge graph, reflection
-- [Conversations](docs/conversations.md) — NPC and player dialogue
-- [Game World](docs/game-world.md) — map generation, rendering, pathfinding
-- [Server API](docs/server-api.md) — endpoint reference
+The Phaser logo and characters are &copy; 2011 - 2025 Phaser Studio Inc.
 
-## License
-
-[MIT](LICENSE)
+All rights reserved.

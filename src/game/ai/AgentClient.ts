@@ -1,4 +1,4 @@
-import type { SkillSelection, ReasoningResult, Observation } from './types';
+import type { SkillSelection, ReasoningResult, Observation, Goal, GoalEvaluationResult } from './types';
 
 const BASE_URL = 'http://localhost:3001';
 
@@ -82,11 +82,26 @@ export function reportFailure(
     failureEvents: string[],
     skill?: string,
     stuckCount?: number,
+    goalDescription?: string,
+    goalContext?: string,
+    evaluationCriteria?: string,
+    outcome?: string,
+    resourceCost?: string,
 ): void {
     fetch(`${BASE_URL}/api/npc/failure`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, failureEvents, skill, stuckCount }),
+        body: JSON.stringify({
+            npcId,
+            failureEvents,
+            skill,
+            stuckCount,
+            goalDescription,
+            goalContext,
+            evaluationCriteria,
+            outcome,
+            resourceCost,
+        }),
     }).catch(() => {});
 }
 
@@ -98,186 +113,48 @@ export function reportSkillOutcome(skill: string, success: boolean): void {
     }).catch(() => {});
 }
 
-// ── Protocol endpoints ──────────────────────────────────
-
-export interface ProposeSubTask {
-    id: string;
-    description: string;
-    completionCriteria: string;
-    actions?: { type: string; [key: string]: unknown }[];
-    dependencies?: string[];
-}
-
-export interface ProposeResponse {
-    type: 'propose';
-    id: string;
-    from: string;
-    taskDescription: string;
-    interpretation?: string;
-    subTasks?: ProposeSubTask[];
-    completionCriteria?: string;
-    rollupLogic?: string;
-    failureModes?: string[];
-}
-
-export interface DialogueResponse {
-    dialogue: string;
-    internalThought?: string;
-    taskRequested?: string | null;
-}
-
-export interface EvaluateResponse {
-    approved: boolean;
-    type?: 'question';
-    id?: string;
-    from?: string;
-    kind?: string;
-    concern?: string;
-    evidence?: string;
-    suggestedAlternative?: string;
-}
-
-export interface ReviseResponse {
-    type: 'revise';
-    id: string;
-    from: string;
-    originalProposalId: string;
-    triggeredBy: string;
-    revisedSubTasks?: { id: string; description: string; completionCriteria: string }[];
-    revisedCompletionCriteria?: string;
-    explanation?: string;
-}
-
-export interface RememberResponse {
-    type: 'remember';
-    id: string;
-    from: string;
-    lessons: { insight: string; condition: string; confidence: number }[];
-}
-
-export async function propose(
+export function reportCommitment(
     npcId: string,
-    taskDescription: string,
-    worldSummary: string,
-    capabilities?: string,
-    memories?: string[],
-): Promise<ProposeResponse> {
-    const res = await fetch(`${BASE_URL}/api/protocol/propose`, {
+    from: string,
+    to: string,
+    goalId: string,
+    description: string,
+    status: 'agreed' | 'in_progress' | 'completed' | 'failed',
+): void {
+    fetch(`${BASE_URL}/api/npc/commitment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, taskDescription, worldSummary, capabilities, memories }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as ProposeResponse;
+        body: JSON.stringify({ npcId, from, to, goalId, description, status }),
+    }).catch(() => {});
 }
 
-export async function dialogue(
+export async function evaluateGoal(
     npcId: string,
-    partner: string,
-    worldSummary: string,
-    history?: { speaker: string; text: string }[],
-    purpose?: string,
-    memories?: string[],
-    role?: 'initiator' | 'responder',
-): Promise<DialogueResponse> {
-    const res = await fetch(`${BASE_URL}/api/protocol/dialogue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, partner, worldSummary, history, purpose, memories, role }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as DialogueResponse;
-}
+    observation: Observation,
+    goal: Goal,
+): Promise<GoalEvaluationResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
 
-export async function evaluateProposal(
-    npcId: string,
-    proposal: {
-        taskDescription: string;
-        interpretation: string;
-        subTasks: { id: string; description: string; completionCriteria: string }[];
-        completionCriteria: string;
-        rollupLogic: string;
-    },
-    worldSummary: string,
-    memories?: string[],
-): Promise<EvaluateResponse> {
-    const res = await fetch(`${BASE_URL}/api/protocol/evaluate-proposal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, proposal, worldSummary, memories }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as EvaluateResponse;
-}
-
-export async function revise(
-    npcId: string,
-    originalProposal: {
-        taskDescription: string;
-        interpretation: string;
-        subTasks: { id: string; description: string; completionCriteria: string }[];
-        completionCriteria: string;
-    },
-    question: {
-        kind: string;
-        concern: string;
-        evidence: string;
-        suggestedAlternative?: string;
-    },
-    worldSummary: string,
-): Promise<ReviseResponse> {
-    const res = await fetch(`${BASE_URL}/api/protocol/revise`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, originalProposal, question, worldSummary }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as ReviseResponse;
-}
-
-export async function remember(
-    npcId: string,
-    taskContext: string,
-    outcome: string,
-): Promise<RememberResponse> {
-    const res = await fetch(`${BASE_URL}/api/protocol/remember`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, taskContext, outcome }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as RememberResponse;
-}
-
-// ── Memory endpoints ──────────────────────────────────
-
-export async function fetchRelevantMemories(
-    npcId: string,
-    query: string,
-): Promise<string[]> {
     try {
-        const res = await fetch(`${BASE_URL}/api/memory/relevant`, {
+        const res = await fetch(`${BASE_URL}/api/npc/goal/evaluate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ npcId, query }),
+            body: JSON.stringify({ npcId, observation, goal }),
+            signal: controller.signal,
         });
-        if (!res.ok) return [];
-        const data = (await res.json()) as { memories: string[] };
-        return data.memories ?? [];
-    } catch {
-        return [];
-    }
-}
 
-export async function storeMemory(
-    npcId: string,
-    text: string,
-    type: string = 'lesson',
-    importance: number = 0.7,
-): Promise<void> {
-    fetch(`${BASE_URL}/api/memory/store`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npcId, text, type, importance }),
-    }).catch(() => {});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as GoalEvaluationResult;
+    } catch (err) {
+        console.warn(`[AgentClient] evaluateGoal failed for ${npcId}:`, err);
+        return {
+            timestamp: Date.now(),
+            progressScore: 0.5,
+            summary: 'Goal evaluation unavailable; maintaining current strategy.',
+            shouldEscalate: false,
+        };
+    } finally {
+        clearTimeout(timeout);
+    }
 }

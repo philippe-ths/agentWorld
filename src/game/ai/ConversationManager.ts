@@ -1,6 +1,7 @@
 import type { NPC } from '../entities/NPC';
 import type { EntityManager } from '../entities/EntityManager';
-import { dialogue as apiDialogue } from './AgentClient';
+import * as AgentClient from './AgentClient';
+import type { Observation, NearbyEntity } from './types';
 import { log as logEvent } from '../ui/EventLog';
 
 interface Conversation {
@@ -10,7 +11,6 @@ interface Conversation {
     turnIndex: number;
     maxTurns: number;
     active: boolean;
-    purpose?: string;
 }
 
 const MAX_TURNS = 5;
@@ -25,13 +25,14 @@ export class ConversationManager {
     constructor(entityManager: EntityManager) {
         this.entityManager = entityManager;
 
+        // Listen for NPC conversation requests
         window.addEventListener('npc-wants-converse', ((e: CustomEvent) => {
-            const { npcId, targetName, purpose } = e.detail;
-            this.tryStartConversation(npcId, targetName, purpose);
+            const { npcId, targetName } = e.detail;
+            this.tryStartConversation(npcId, targetName);
         }) as EventListener);
     }
 
-    private tryStartConversation(initiatorId: string, targetName: string, purpose?: string) {
+    private tryStartConversation(initiatorId: string, targetName: string) {
         if (this.busyNpcs.has(initiatorId)) return;
 
         const entities = this.entityManager.getAll();
@@ -44,12 +45,11 @@ export class ConversationManager {
         const targetNpc = target as NPC;
         if (this.busyNpcs.has(targetNpc.id)) return;
 
-        this.startConversation(initiator, targetNpc, purpose);
+        this.startConversation(initiator, targetNpc);
     }
 
-    private async startConversation(npc1: NPC, npc2: NPC, purpose?: string) {
+    private async startConversation(npc1: NPC, npc2: NPC) {
         const id = `conv_${Date.now()}`;
-
         const conv: Conversation = {
             id,
             participants: [npc1, npc2],
@@ -57,13 +57,13 @@ export class ConversationManager {
             turnIndex: 0,
             maxTurns: MAX_TURNS,
             active: true,
-            purpose,
         };
 
         this.conversations.set(id, conv);
         this.busyNpcs.add(npc1.id);
         this.busyNpcs.add(npc2.id);
 
+        // Pause both NPCs
         npc1.isInConversation = true;
         npc2.isInConversation = true;
         npc1.setPlan([]);
@@ -76,6 +76,7 @@ export class ConversationManager {
         logEvent(npc2.name, 'system', `conversation started with ${npc1.name}`,
             { npcId: npc2.id, relatedNpcId: npc1.id });
 
+        // Run conversation turns
         await this.runConversation(conv);
     }
 
@@ -86,24 +87,14 @@ export class ConversationManager {
             const speaker = turn % 2 === 0 ? npc1 : npc2;
             const listener = turn % 2 === 0 ? npc2 : npc1;
 
-            const worldSummary = speaker.protocolAgent?.getWorldSummary() ?? '';
+            const observation = this.buildObservation(speaker, listener);
 
             const t0 = performance.now();
-            // In purpose-driven conversations, the initiator is the delegator;
-            // the responder should not generate taskRequested
-            const isInitiator = speaker === npc1;
-            const role = conv.purpose
-                ? (isInitiator ? 'initiator' : 'responder')
-                : undefined;
-
-            const result = await apiDialogue(
+            const result = await AgentClient.reason(
                 speaker.id,
-                listener.name,
-                worldSummary,
+                observation,
                 conv.history,
-                conv.purpose,
-                undefined,
-                role,
+                listener.name,
             );
             const latency = Math.round(performance.now() - t0);
 
@@ -111,29 +102,124 @@ export class ConversationManager {
 
             logEvent(speaker.name, 'llm-call',
                 `dialogue generation — ${latency}ms`,
-                { npcId: speaker.id, relatedNpcId: listener.id, metadata: { model: 'claude-haiku', latency } },
+                { npcId: speaker.id, relatedNpcId: listener.id, metadata: { model: 'claude-sonnet-4', latency } },
             );
 
             const text = result.dialogue ?? '...';
+
+            if (result.goalExtraction?.shouldCreateGoal && result.goalExtraction.goal) {
+                const now = Date.now();
+                const extracted = result.goalExtraction.goal;
+                const goal = {
+                    id: `goal_${speaker.id}_${now}`,
+                    npcId: speaker.id,
+                    type: extracted.type,
+                    description: extracted.description,
+                    source: {
+                        type: 'npc_dialogue' as const,
+                        conversationId: conv.id,
+                        assignedBy: listener.name,
+                    },
+                    evaluation: extracted.evaluation,
+                    status: 'active' as const,
+                    priority: Math.max(0, Math.min(1, extracted.priority)),
+                    createdAt: now,
+                    expiresAt: null,
+                    resources: {
+                        totalTokensIn: 0,
+                        totalTokensOut: 0,
+                        estimatedCostUSD: 0,
+                        haikuCalls: 0,
+                        sonnetCalls: 0,
+                        embeddingCalls: 0,
+                        pathfindingCalls: 0,
+                        evaluationCalls: 0,
+                        wallClockMs: 0,
+                        apiLatencyMs: 0,
+                        mediumLoopTicks: 0,
+                    },
+                    parentGoalId: null,
+                    delegatedTo: null,
+                    delegatedFrom: null,
+                    estimatedDifficulty: extracted.estimatedDifficulty,
+                };
+
+                const outcome = speaker.addGoal(goal);
+                logEvent(speaker.name, 'system',
+                    outcome === 'ignored'
+                        ? `declined goal (low priority): ${goal.description}`
+                        : `accepted goal: ${goal.description}`,
+                    { npcId: speaker.id, relatedNpcId: listener.id },
+                );
+
+                // Delegation support: speaker can assign partner a mirrored delegated sub-goal.
+                if (extracted.delegation?.delegateToPartner) {
+                    goal.delegatedTo = listener.id;
+                    const delegated = {
+                        ...goal,
+                        id: `${goal.id}_delegated_${listener.id}`,
+                        npcId: listener.id,
+                        source: {
+                            type: 'delegated' as const,
+                            conversationId: conv.id,
+                            assignedBy: speaker.name,
+                        },
+                        parentGoalId: goal.id,
+                        delegatedTo: null,
+                        delegatedFrom: speaker.id,
+                    };
+
+                    const delegatedOutcome = listener.addGoal(delegated);
+                    logEvent(listener.name, 'system',
+                        delegatedOutcome === 'ignored'
+                            ? `declined delegated task from ${speaker.name}: ${delegated.description}`
+                            : `accepted delegated task from ${speaker.name}: ${delegated.description}`,
+                        { npcId: listener.id, relatedNpcId: speaker.id },
+                    );
+
+                    if (delegatedOutcome !== 'ignored') {
+                        AgentClient.reportCommitment(
+                            speaker.id,
+                            speaker.name,
+                            listener.name,
+                            goal.id,
+                            goal.description,
+                            'agreed',
+                        );
+                        AgentClient.reportCommitment(
+                            listener.id,
+                            speaker.name,
+                            listener.name,
+                            delegated.id,
+                            delegated.description,
+                            'in_progress',
+                        );
+                    }
+                }
+
+                if (extracted.delegation?.delegatedTask) {
+                    goal.delegatedFrom = listener.id;
+                    AgentClient.reportCommitment(
+                        speaker.id,
+                        listener.name,
+                        speaker.name,
+                        goal.id,
+                        goal.description,
+                        'in_progress',
+                    );
+                }
+            }
 
             conv.history.push({ speaker: speaker.name, text });
             logEvent(speaker.name, 'conversation', `→ ${listener.name}: ${text}`,
                 { npcId: speaker.id, relatedNpcId: listener.id });
 
+            // Show speech bubble
             speaker.say(text, SPEECH_DURATION);
             speaker.addEvent(`said to ${listener.name}: "${text}"`);
-            listener.addEvent(`${speaker.name} said: "${text}"`);
+            listener.addEvent(`${speaker.name} said: "${text}"`); 
 
-            // If the speaker's dialogue requests a task from the listener, delegate it.
-            // In purpose-driven conversations, only the initiator can delegate — the
-            // responder's acknowledgement must NOT spin up a mirror protocol cycle.
-            const canDelegate = !conv.purpose || speaker === npc1;
-            if (result.taskRequested && listener.protocolAgent && canDelegate) {
-                listener.addEvent(`received task from ${speaker.name}: "${result.taskRequested}"`);
-                listener.protocolAgent.receiveTask(result.taskRequested, speaker.name)
-                    .catch(err => console.warn('[ConversationManager] Task delegation failed:', err));
-            }
-
+            // Wait for speech bubble to finish
             await this.delay(SPEECH_DURATION + PAUSE_BETWEEN);
         }
 
@@ -149,10 +235,6 @@ export class ConversationManager {
         this.busyNpcs.delete(npc1.id);
         this.busyNpcs.delete(npc2.id);
 
-        // Signal BehaviorMachines so converse_with actions complete
-        npc1.behaviorMachine.conversationEnded();
-        npc2.behaviorMachine.conversationEnded();
-
         npc1.addEvent(`ended conversation with ${npc2.name}`);
         npc2.addEvent(`ended conversation with ${npc1.name}`);
         logEvent(npc1.name, 'system', `conversation ended with ${npc2.name}`,
@@ -161,6 +243,26 @@ export class ConversationManager {
             { npcId: npc2.id, relatedNpcId: npc1.id });
 
         this.conversations.delete(conv.id);
+    }
+
+    private buildObservation(speaker: NPC, listener: NPC): Observation {
+        const nearby: NearbyEntity[] = [{
+            id: listener.id,
+            name: listener.name,
+            position: { ...listener.tilePos },
+            distance: 1,
+        }];
+
+        return {
+            npcId: speaker.id,
+            name: speaker.name,
+            position: { ...speaker.tilePos },
+            nearbyEntities: nearby,
+            isInConversation: true,
+            currentSkill: 'converse',
+            recentEvents: [...speaker.recentEvents],
+            activeGoals: speaker.activeGoals.map(g => ({ ...g })),
+        };
     }
 
     private delay(ms: number): Promise<void> {

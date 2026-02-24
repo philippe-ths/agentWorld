@@ -1,23 +1,24 @@
 import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
-import { Action } from '../ai/types';
+import { Action, Goal } from '../ai/types';
 import { AgentLoop } from '../ai/AgentLoop';
-import { BehaviorMachine } from '../ai/BehaviorMachine';
-import type { ProtocolAgent } from '../protocol/ProtocolAgent';
 import type { EntityManager } from './EntityManager';
-import type { WorldQuery } from '../world/WorldQuery';
 import { log as logEvent } from '../ui/EventLog';
 
 export class NPC extends Entity {
     readonly id: string;
+    currentPlan: Action[] = [];
+    private planIndex = 0;
+    private waitTimer = 0;
+    private planHadFailure = false;
     isInConversation = false;
     currentSkill: string | null = null;
     recentEvents: string[] = [];
+    activeGoals: Goal[] = [];
 
-    behaviorMachine!: BehaviorMachine;
-    protocolAgent?: ProtocolAgent;
+    // Callback fired when the NPC finishes its current plan
+    onPlanComplete?: (hadFailure: boolean) => void;
     private agentLoop?: AgentLoop;
-    private completionCheckAccum = 0;
 
     constructor(
         scene: Scene,
@@ -36,17 +37,15 @@ export class NPC extends Entity {
         this.agentLoop = new AgentLoop(this, entityManager);
     }
 
-    initBehaviorMachine(world: WorldQuery, entityManager: EntityManager) {
-        this.behaviorMachine = new BehaviorMachine(this, world, entityManager);
-    }
-
     pauseAI() { this.agentLoop?.pause(); }
     resumeAI() { this.agentLoop?.resume(); }
 
     restartAI(startTile: TilePos) {
         this.agentLoop?.restart();
+        this.currentPlan = [];
         this.recentEvents = [];
         this.currentSkill = null;
+        this.activeGoals = [];
         this.isInConversation = false;
         this.tilePos = { ...startTile };
         const worldPos = this.map.tileToWorldXY(startTile.x, startTile.y)!;
@@ -54,23 +53,100 @@ export class NPC extends Entity {
         this.updateDepth();
     }
 
-    /** Backwards-compatible: converts action array into a sequence for BehaviorMachine. */
+    addGoal(goal: Goal): 'added' | 'replaced' | 'ignored' {
+        if (this.activeGoals.length < 3) {
+            this.activeGoals.push(goal);
+            this.activeGoals.sort((a, b) => b.priority - a.priority);
+            return 'added';
+        }
+
+        let lowestIdx = 0;
+        for (let i = 1; i < this.activeGoals.length; i++) {
+            if (this.activeGoals[i].priority < this.activeGoals[lowestIdx].priority) {
+                lowestIdx = i;
+            }
+        }
+
+        if (goal.priority > this.activeGoals[lowestIdx].priority) {
+            this.activeGoals[lowestIdx] = goal;
+            this.activeGoals.sort((a, b) => b.priority - a.priority);
+            return 'replaced';
+        }
+
+        return 'ignored';
+    }
+
     setPlan(actions: Action[]) {
-        if (actions.length > 0) {
-            this.behaviorMachine.execute({ type: 'sequence', actions });
+        this.currentPlan = actions;
+        this.planIndex = 0;
+        this.waitTimer = 0;
+        this.planHadFailure = false;
+    }
+
+    update(_time: number, delta: number) {
+        // Run agent loop (medium-loop timer)
+        this.agentLoop?.update(_time, delta);
+
+        if (this.planIndex >= this.currentPlan.length) {
+            // Plan exhausted — notify
+            if (this.currentPlan.length > 0) {
+                const hadFailure = this.planHadFailure;
+                this.currentPlan = [];
+                this.planIndex = 0;
+                this.onPlanComplete?.(hadFailure);
+            }
+            return;
+        }
+
+        const action = this.currentPlan[this.planIndex];
+
+        switch (action.type) {
+            case 'move':
+                if (this.isMoving) return; // wait for current tween
+                this.executeMove(action.target);
+                break;
+            case 'wait':
+                this.waitTimer += delta;
+                if (this.waitTimer >= action.duration) {
+                    this.waitTimer = 0;
+                    this.planIndex++;
+                }
+                break;
+            case 'speak':
+                this.executeSpeech(action.text);
+                break;
         }
     }
 
-    update(time: number, delta: number) {
-        this.agentLoop?.update(time, delta);
-        this.behaviorMachine?.update(time, delta);
+    private executeMove(target: TilePos) {
+        const dx = Math.sign(target.x - this.tilePos.x);
+        const dy = Math.sign(target.y - this.tilePos.y);
 
-        // Periodically check mechanical completion conditions (~500ms)
-        this.completionCheckAccum += delta;
-        if (this.completionCheckAccum >= 500) {
-            this.completionCheckAccum = 0;
-            this.protocolAgent?.checkCompletions();
+        // Prefer the axis with larger distance
+        let moved = false;
+        if (Math.abs(target.x - this.tilePos.x) >= Math.abs(target.y - this.tilePos.y)) {
+            if (dx !== 0) moved = this.moveTo(dx, 0);
+            if (!moved && dy !== 0) moved = this.moveTo(0, dy);
+        } else {
+            if (dy !== 0) moved = this.moveTo(0, dy);
+            if (!moved && dx !== 0) moved = this.moveTo(dx, 0);
         }
+
+        // Check if we reached the target tile
+        if (this.tilePos.x === target.x && this.tilePos.y === target.y) {
+            this.planIndex++;
+        } else if (!moved) {
+            // Stuck — skip this move action
+            this.planIndex++;
+            this.planHadFailure = true;
+            this.addEvent('stuck while moving');
+        }
+    }
+
+    private executeSpeech(text: string) {
+        this.say(text);
+        this.addEvent(`said: "${text}"`);
+        this.planIndex++;
     }
 
     addEvent(event: string) {

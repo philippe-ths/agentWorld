@@ -1,8 +1,11 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { getAll, clear } from './ShortTermBuffer.js';
 import { addMemory } from './LongTermMemory.js';
 import { addRule } from './KnowledgeGraph.js';
-import { getPersona } from '../ai/PromptTemplates.js';
-import { enqueue, Priority } from '../ai/ApiQueue.js';
+import { buildReflectionPrompt, buildSelfCritiquePrompt, getPersona } from '../ai/PromptTemplates.js';
+import { recordOutcome } from '../skills/SkillLibrary.js';
+
+const client = new Anthropic({ maxRetries: 3 });
 
 export async function reflect(
     npcId: string,
@@ -18,11 +21,13 @@ export async function reflect(
         return `[${new Date(o.timestamp).toLocaleTimeString()}] At (${o.position.x},${o.position.y})${nearby}: ${o.event}`;
     });
 
-    const persona = getPersona(npcId);
-    const prompt = `You are ${persona.name} (${persona.personality}). Reflect on these recent events and extract insights:\n${events.join('\n')}`;
+    const prompt = buildReflectionPrompt(events, {
+        activeGoals: context?.activeGoals,
+        recentOutcomes: context?.recentOutcomes,
+    });
 
     try {
-        const response = await enqueue(Priority.BACKGROUND, {
+        const response = await client.messages.create({
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],
@@ -61,10 +66,15 @@ export async function selfCritique(
     if (failureEvents.length === 0) return;
 
     const persona = getPersona(npcId);
-    const prompt = `You are ${persona.name} (${persona.personality}). Analyze these failures and extract short lessons:\n${failureEvents.join('\n')}`;
+    const prompt = buildSelfCritiquePrompt(persona, failureEvents, context);
+
+    // Record skill failure
+    if (context.skill) {
+        await recordOutcome(context.skill, false);
+    }
 
     try {
-        const response = await enqueue(Priority.BACKGROUND, {
+        const response = await client.messages.create({
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],

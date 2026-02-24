@@ -1,60 +1,65 @@
-import { Player } from './entities/Player';
 import { NPC } from './entities/NPC';
 import { Entity } from './entities/Entity';
 
 export const NPC_ACTIONS_PER_TURN = 3;
 
-type TurnState = 'waiting-for-player' | 'npc-turn' | 'animating';
+type TurnState = 'idle' | 'npc-turn';
 
 export class TurnManager {
-    private player: Player;
     private npcs: NPC[];
-    private state: TurnState = 'waiting-for-player';
+    private state: TurnState = 'idle';
+    private activeNpc: NPC | null = null;
     private turnNumber = 0;
+    private turnLabel!: Phaser.GameObjects.Text;
 
-    /** Called when a new turn round starts. */
-    onRoundStart?: (turnNumber: number) => void;
-    /** Called when it becomes an NPC's turn (before actions). */
-    onNpcTurn?: (npc: NPC, actionsPerTurn: number) => Promise<{ type: 'move_to'; x: number; y: number } | { type: 'wait' }>[];
+    /** Called before each NPC's turn — return actions from LLM in Phase 3. */
+    onNpcTurn?: (npc: NPC, actionsPerTurn: number) => Promise<void>;
 
-    constructor(player: Player, npcs: NPC[]) {
-        this.player = player;
+    constructor(scene: Phaser.Scene, npcs: NPC[]) {
         this.npcs = npcs;
-        this.startPlayerTurn();
+
+        this.turnLabel = scene.add.text(10, 10, '', {
+            fontSize: '14px',
+            color: '#ffffff',
+            fontFamily: 'Arial, sans-serif',
+            stroke: '#000000',
+            strokeThickness: 3,
+        });
+        this.turnLabel.setScrollFactor(0);
+        this.turnLabel.setDepth(1000);
+
+        this.runLoop();
     }
 
-    /** Called every frame — keeps label positions updated. */
+    /** Called every frame — keeps label positions updated and player moving. */
     updateVisuals(entities: Entity[]) {
         for (const e of entities) {
             e.updateLabel();
         }
     }
 
-    private async startPlayerTurn() {
-        this.turnNumber++;
-        this.state = 'waiting-for-player';
-        this.onRoundStart?.(this.turnNumber);
+    private async runLoop() {
+        while (true) {
+            this.turnNumber++;
+            for (const npc of this.npcs) {
+                this.state = 'npc-turn';
+                this.activeNpc = npc;
+                this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
 
-        // Wait for the player to press a key and finish the move animation
-        await this.player.awaitAction();
-
-        // Player turn done — run NPC turns
-        await this.runNpcTurns();
-
-        // All done — start next round
-        this.startPlayerTurn();
-    }
-
-    private async runNpcTurns() {
-        this.state = 'npc-turn';
-
-        for (const _npc of this.npcs) {
-            // For now, NPCs just wait (no LLM yet).
-            // When LLM is integrated, onNpcTurn will return real actions.
-            for (let i = 0; i < NPC_ACTIONS_PER_TURN; i++) {
-                // Placeholder: wait (no-op)
-                await this.delay(50);
+                if (this.onNpcTurn) {
+                    await this.onNpcTurn(npc, NPC_ACTIONS_PER_TURN);
+                } else {
+                    // Placeholder: NPCs wait (no LLM yet)
+                    for (let i = 0; i < NPC_ACTIONS_PER_TURN; i++) {
+                        await this.delay(50);
+                    }
+                }
             }
+
+            this.state = 'idle';
+            this.activeNpc = null;
+            this.turnLabel.setText(`Turn ${this.turnNumber} — NPCs thinking...`);
+            await this.delay(100);
         }
     }
 
@@ -64,6 +69,10 @@ export class TurnManager {
 
     getState(): TurnState {
         return this.state;
+    }
+
+    getActiveNpc(): NPC | null {
+        return this.activeNpc;
     }
 
     getTurnNumber(): number {

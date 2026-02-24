@@ -34,11 +34,7 @@ export class GameScene extends Scene {
         // Temporary: log world state so we can inspect the format
         console.log(buildWorldState(this.player, this.entityManager.getEntities()));
 
-        this.turnManager = new TurnManager(this.player, this.npcs);
-        this.turnManager.onRoundStart = (turn) => {
-            console.log(`--- Turn ${turn} ---`);
-            console.log(buildWorldState(this.player, this.entityManager.getEntities()));
-        };
+        this.turnManager = new TurnManager(this, this.npcs);
     }
 
     // ── Tilemap ──────────────────────────────────────────────
@@ -168,7 +164,8 @@ export class GameScene extends Scene {
 
     // ── Update loop ──────────────────────────────────────────
 
-    update(_time: number, _delta: number) {
+    update(time: number, delta: number) {
+        this.player.update(time, delta);
         this.turnManager.updateVisuals(this.entityManager.getEntities());
     }
 }

@@ -1,5 +1,3 @@
-// Tile types: 0 = grass, 1 = water (non-walkable)
-export const TILE_GRASS = 0;
 export const TILE_WATER = 1;
 
 export const MAP_WIDTH = 64;
@@ -24,7 +22,7 @@ function generateMap(width: number, height: number, seed = 42): number[][] {
     for (let y = 0; y < height; y++) {
         map[y] = [];
         for (let x = 0; x < width; x++) {
-            map[y][x] = TILE_GRASS;
+            map[y][x] = 0;
         }
     }
 
@@ -64,7 +62,7 @@ function generateMap(width: number, height: number, seed = 42): number[][] {
                 const sx = sp.x + dx;
                 const sy = sp.y + dy;
                 if (sx >= 0 && sx < width && sy >= 0 && sy < height) {
-                    map[sy][sx] = TILE_GRASS;
+                    map[sy][sx] = 0;
                 }
             }
         }

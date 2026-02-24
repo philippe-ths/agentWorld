@@ -4,17 +4,12 @@ import { TILE_W, TILE_H } from '../entities/Entity';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
-import { ConversationManager } from '../ai/ConversationManager';
-import { ChatController } from '../ui/ChatController';
-import { ControlBar } from '../ui/ControlBar';
-import { LogPanel } from '../ui/LogPanel';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
 export class GameScene extends Scene {
-    map!: Phaser.Tilemaps.Tilemap;
-    private groundLayer!: Phaser.Tilemaps.TilemapLayer;
-    entityManager!: EntityManager;
+    private map!: Phaser.Tilemaps.Tilemap;
+    private entityManager!: EntityManager;
     private player!: Player;
 
     constructor() {
@@ -30,10 +25,6 @@ export class GameScene extends Scene {
         this.entityManager.add(this.player);
 
         this.spawnNPCs();
-        new ConversationManager(this.entityManager);
-        new ChatController(this, this.player, this.entityManager);
-        new ControlBar(this.entityManager);
-        new LogPanel(this.entityManager);
         this.setupCamera();
     }
 
@@ -63,11 +54,11 @@ export class GameScene extends Scene {
             if (ts) tilesets.push(ts);
         }
 
-        this.groundLayer = this.map.createBlankLayer('ground', tilesets, 0, 0)!;
+        const groundLayer = this.map.createBlankLayer('ground', tilesets, 0, 0)!;
 
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
-                this.map.putTileAt(MAP_DATA[y][x], x, y, false, this.groundLayer);
+                this.map.putTileAt(MAP_DATA[y][x], x, y, false, groundLayer);
             }
         }
     }
@@ -137,7 +128,6 @@ export class GameScene extends Scene {
                 this, this.map, def.tile,
                 this.entityManager.isWalkable, def.name, def.tint,
             );
-            npc.initAgentLoop(this.entityManager);
             this.entityManager.add(npc);
         }
     }

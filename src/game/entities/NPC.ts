@@ -1,24 +1,10 @@
 import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
-import { Action, Goal } from '../ai/types';
-import { AgentLoop } from '../ai/AgentLoop';
-import type { EntityManager } from './EntityManager';
-import { log as logEvent } from '../ui/EventLog';
 
 export class NPC extends Entity {
-    readonly id: string;
-    currentPlan: Action[] = [];
-    private planIndex = 0;
+    private moveTarget: TilePos | null = null;
     private waitTimer = 0;
-    private planHadFailure = false;
-    isInConversation = false;
-    currentSkill: string | null = null;
-    recentEvents: string[] = [];
-    activeGoals: Goal[] = [];
-
-    // Callback fired when the NPC finishes its current plan
-    onPlanComplete?: (hadFailure: boolean) => void;
-    private agentLoop?: AgentLoop;
+    private nextMoveDelay = 0;
 
     constructor(
         scene: Scene,
@@ -29,100 +15,42 @@ export class NPC extends Entity {
         tint: number,
     ) {
         super(scene, map, 'player', startTile, checkWalkable, name);
-        this.id = name.toLowerCase().replace(/\s+/g, '_');
         this.sprite.setTint(tint);
-    }
-
-    initAgentLoop(entityManager: EntityManager) {
-        this.agentLoop = new AgentLoop(this, entityManager);
-    }
-
-    pauseAI() { this.agentLoop?.pause(); }
-    resumeAI() { this.agentLoop?.resume(); }
-
-    restartAI(startTile: TilePos) {
-        this.agentLoop?.restart();
-        this.currentPlan = [];
-        this.recentEvents = [];
-        this.currentSkill = null;
-        this.activeGoals = [];
-        this.isInConversation = false;
-        this.tilePos = { ...startTile };
-        const worldPos = this.map.tileToWorldXY(startTile.x, startTile.y)!;
-        this.sprite.setPosition(worldPos.x + 32, worldPos.y + 16);
-        this.updateDepth();
-    }
-
-    addGoal(goal: Goal): 'added' | 'replaced' | 'ignored' {
-        if (this.activeGoals.length < 3) {
-            this.activeGoals.push(goal);
-            this.activeGoals.sort((a, b) => b.priority - a.priority);
-            return 'added';
-        }
-
-        let lowestIdx = 0;
-        for (let i = 1; i < this.activeGoals.length; i++) {
-            if (this.activeGoals[i].priority < this.activeGoals[lowestIdx].priority) {
-                lowestIdx = i;
-            }
-        }
-
-        if (goal.priority > this.activeGoals[lowestIdx].priority) {
-            this.activeGoals[lowestIdx] = goal;
-            this.activeGoals.sort((a, b) => b.priority - a.priority);
-            return 'replaced';
-        }
-
-        return 'ignored';
-    }
-
-    setPlan(actions: Action[]) {
-        this.currentPlan = actions;
-        this.planIndex = 0;
-        this.waitTimer = 0;
-        this.planHadFailure = false;
+        this.nextMoveDelay = 1000 + Math.random() * 3000;
     }
 
     update(_time: number, delta: number) {
-        // Run agent loop (medium-loop timer)
-        this.agentLoop?.update(_time, delta);
-
-        if (this.planIndex >= this.currentPlan.length) {
-            // Plan exhausted — notify
-            if (this.currentPlan.length > 0) {
-                const hadFailure = this.planHadFailure;
-                this.currentPlan = [];
-                this.planIndex = 0;
-                this.onPlanComplete?.(hadFailure);
-            }
+        if (this.moveTarget) {
+            if (this.isMoving) return;
+            this.stepToward(this.moveTarget);
             return;
         }
 
-        const action = this.currentPlan[this.planIndex];
+        // Waiting between wanders
+        this.waitTimer += delta;
+        if (this.waitTimer < this.nextMoveDelay) return;
+        this.waitTimer = 0;
+        this.nextMoveDelay = 2000 + Math.random() * 4000;
 
-        switch (action.type) {
-            case 'move':
-                if (this.isMoving) return; // wait for current tween
-                this.executeMove(action.target);
-                break;
-            case 'wait':
-                this.waitTimer += delta;
-                if (this.waitTimer >= action.duration) {
-                    this.waitTimer = 0;
-                    this.planIndex++;
-                }
-                break;
-            case 'speak':
-                this.executeSpeech(action.text);
-                break;
-        }
+        // Pick a random nearby tile to walk to
+        const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+        const dir = dirs[Math.floor(Math.random() * dirs.length)];
+        const dist = 1 + Math.floor(Math.random() * 3);
+        this.moveTarget = {
+            x: this.tilePos.x + dir.x * dist,
+            y: this.tilePos.y + dir.y * dist,
+        };
     }
 
-    private executeMove(target: TilePos) {
+    private stepToward(target: TilePos) {
         const dx = Math.sign(target.x - this.tilePos.x);
         const dy = Math.sign(target.y - this.tilePos.y);
 
-        // Prefer the axis with larger distance
+        if (dx === 0 && dy === 0) {
+            this.moveTarget = null;
+            return;
+        }
+
         let moved = false;
         if (Math.abs(target.x - this.tilePos.x) >= Math.abs(target.y - this.tilePos.y)) {
             if (dx !== 0) moved = this.moveTo(dx, 0);
@@ -132,28 +60,10 @@ export class NPC extends Entity {
             if (!moved && dx !== 0) moved = this.moveTo(dx, 0);
         }
 
-        // Check if we reached the target tile
         if (this.tilePos.x === target.x && this.tilePos.y === target.y) {
-            this.planIndex++;
+            this.moveTarget = null;
         } else if (!moved) {
-            // Stuck — skip this move action
-            this.planIndex++;
-            this.planHadFailure = true;
-            this.addEvent('stuck while moving');
+            this.moveTarget = null; // stuck, give up
         }
-    }
-
-    private executeSpeech(text: string) {
-        this.say(text);
-        this.addEvent(`said: "${text}"`);
-        this.planIndex++;
-    }
-
-    addEvent(event: string) {
-        this.recentEvents.push(event);
-        if (this.recentEvents.length > 20) {
-            this.recentEvents.shift();
-        }
-        logEvent(this.name, 'action', event, { npcId: this.id });
     }
 }

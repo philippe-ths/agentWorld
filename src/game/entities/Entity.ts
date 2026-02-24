@@ -1,5 +1,4 @@
 import { Scene } from 'phaser';
-import { SpeechBubble } from '../ui/SpeechBubble';
 
 export const TILE_W = 64;
 export const TILE_H = 32;
@@ -17,9 +16,7 @@ export abstract class Entity {
     readonly name: string;
     protected scene: Scene;
     protected map: Phaser.Tilemaps.Tilemap;
-    protected spriteKey: string;
     protected checkWalkable: (x: number, y: number) => boolean;
-    private speechBubble?: SpeechBubble;
     private nameLabel!: Phaser.GameObjects.Text;
 
     constructor(
@@ -32,19 +29,18 @@ export abstract class Entity {
     ) {
         this.scene = scene;
         this.map = map;
-        this.spriteKey = spriteKey;
         this.tilePos = { ...startTile };
         this.checkWalkable = checkWalkable;
         this.name = name;
-        this.createSprite();
+        this.createSprite(spriteKey);
     }
 
-    private createSprite() {
+    private createSprite(spriteKey: string) {
         const worldPos = this.map.tileToWorldXY(this.tilePos.x, this.tilePos.y)!;
         this.sprite = this.scene.add.sprite(
             worldPos.x + TILE_W / 2,
             worldPos.y + TILE_H / 2,
-            this.spriteKey,
+            spriteKey,
             0,
         );
         this.sprite.setOrigin(0.5, 0.8);
@@ -63,10 +59,6 @@ export abstract class Entity {
 
     updateDepth() {
         this.sprite.setDepth(this.tilePos.x + this.tilePos.y + 1);
-    }
-
-    getWorldPos(): Phaser.Math.Vector2 {
-        return this.map.tileToWorldXY(this.tilePos.x, this.tilePos.y)!;
     }
 
     moveTo(dx: number, dy: number): boolean {
@@ -109,15 +101,7 @@ export abstract class Entity {
         return true;
     }
 
-    say(text: string, duration?: number) {
-        if (!this.speechBubble) {
-            this.speechBubble = new SpeechBubble(this.scene, this.sprite);
-        }
-        this.speechBubble.show(text, duration);
-    }
-
-    updateBubble() {
-        this.speechBubble?.updatePosition();
+    updateLabel() {
         this.nameLabel.setPosition(
             this.sprite.x,
             this.sprite.y - this.sprite.height * this.sprite.originY - 2,
@@ -128,7 +112,6 @@ export abstract class Entity {
     abstract update(time: number, delta: number): void;
 
     destroy() {
-        this.speechBubble?.destroy();
         this.nameLabel.destroy();
         this.sprite.destroy();
     }

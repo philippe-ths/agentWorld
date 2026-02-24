@@ -1,68 +1,41 @@
 import { Entity } from './entities/Entity';
-import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA } from './MapData';
-
-const TILE_CHARS: Record<number, string> = {
-    0: '.',  // grass
-    1: 'W',  // water
-};
+import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA, TILE_WATER } from './MapData';
 
 export function buildWorldState(observer: Entity, allEntities: Entity[]): string {
     const lines: string[] = [];
 
     // Header
-    lines.push(`MAP: ${MAP_WIDTH}x${MAP_HEIGHT}`);
+    lines.push(`MAP: ${MAP_WIDTH}x${MAP_HEIGHT} (bounds 0,0 to ${MAP_WIDTH - 1},${MAP_HEIGHT - 1})`);
     lines.push(`YOU: ${observer.name} at (${observer.tilePos.x},${observer.tilePos.y})`);
 
-    // Other entities
+    // Other entities with distance
     const others = allEntities.filter(e => e !== observer);
     if (others.length > 0) {
         lines.push('');
         lines.push('ENTITIES:');
         for (const e of others) {
-            const dx = e.tilePos.x - observer.tilePos.x;
-            const dy = e.tilePos.y - observer.tilePos.y;
-            lines.push(`  ${e.name} at (${e.tilePos.x},${e.tilePos.y}) [offset ${dx >= 0 ? '+' : ''}${dx},${dy >= 0 ? '+' : ''}${dy}]`);
+            const dist = Math.abs(e.tilePos.x - observer.tilePos.x) + Math.abs(e.tilePos.y - observer.tilePos.y);
+            lines.push(`  ${e.name} (${e.tilePos.x},${e.tilePos.y}) dist:${dist}`);
         }
     }
 
-    // Full map grid
-    lines.push('');
-    lines.push(`MAP (${MAP_WIDTH}x${MAP_HEIGHT}, @ = you):`);
-
-    // Build entity lookup
-    const entityAt = new Map<string, string>();
-    for (const e of allEntities) {
-        if (e === observer) continue;
-        entityAt.set(`${e.tilePos.x},${e.tilePos.y}`, e.name[0]);
-    }
-
+    // Water tiles — sparse list, only non-grass
+    const waterCoords: string[] = [];
     for (let y = 0; y < MAP_HEIGHT; y++) {
-        const row: string[] = [];
         for (let x = 0; x < MAP_WIDTH; x++) {
-            if (x === observer.tilePos.x && y === observer.tilePos.y) {
-                row.push('@');
-            } else if (entityAt.has(`${x},${y}`)) {
-                row.push(entityAt.get(`${x},${y}`)!);
-            } else {
-                row.push(TILE_CHARS[MAP_DATA[y][x]] ?? '?');
+            if (MAP_DATA[y][x] === TILE_WATER) {
+                waterCoords.push(`(${x},${y})`);
             }
         }
-        lines.push('  ' + row.join(' '));
     }
-
-    // Legend
     lines.push('');
-    lines.push('LEGEND: . = grass, W = water, @ = you');
-    if (entityAt.size > 0) {
-        const legend = others.map(e => `${e.name[0]} = ${e.name}`).join(', ');
-        lines.push(`  ${legend}`);
-    }
+    lines.push(`WATER[${waterCoords.length}]: ${waterCoords.join(' ')}`);
 
     // Actions
     lines.push('');
-    lines.push('ACTIONS (per turn):');
-    lines.push('  move_to(x, y) — walk one step toward tile (x,y)');
-    lines.push('  wait() — do nothing this action');
+    lines.push('ACTIONS:');
+    lines.push('  move_to(x,y) — step toward tile');
+    lines.push('  wait() — skip action');
 
     return lines.join('\n');
 }

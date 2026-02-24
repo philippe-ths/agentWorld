@@ -109,6 +109,45 @@ export abstract class Entity {
         this.nameLabel.setDepth(this.sprite.depth + 0.5);
     }
 
+    /** Returns a promise that resolves when the move tween finishes. */
+    moveToAsync(dx: number, dy: number): Promise<boolean> {
+        return new Promise(resolve => {
+            if (this.isMoving || (dx === 0 && dy === 0)) { resolve(false); return; }
+
+            const targetX = this.tilePos.x + dx;
+            const targetY = this.tilePos.y + dy;
+            if (!this.checkWalkable(targetX, targetY)) { resolve(false); return; }
+
+            let direction: string;
+            if (dy < 0) direction = 'up';
+            else if (dy > 0) direction = 'down';
+            else if (dx < 0) direction = 'left';
+            else direction = 'right';
+
+            this.tilePos.x = targetX;
+            this.tilePos.y = targetY;
+            this.lastDirection = direction;
+            this.updateDepth();
+            this.sprite.play('walk-' + direction, true);
+
+            const worldPos = this.map.tileToWorldXY(targetX, targetY)!;
+            this.isMoving = true;
+
+            this.scene.tweens.add({
+                targets: this.sprite,
+                x: worldPos.x + TILE_W / 2,
+                y: worldPos.y + TILE_H / 2,
+                duration: 180,
+                ease: 'Power2',
+                onComplete: () => {
+                    this.isMoving = false;
+                    this.sprite.play('idle-' + this.lastDirection, true);
+                    resolve(true);
+                },
+            });
+        });
+    }
+
     abstract update(time: number, delta: number): void;
 
     destroy() {

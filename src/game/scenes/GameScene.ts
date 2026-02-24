@@ -5,6 +5,7 @@ import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
 import { buildWorldState } from '../WorldState';
+import { TurnManager } from '../TurnManager';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -12,6 +13,8 @@ export class GameScene extends Scene {
     private map!: Phaser.Tilemaps.Tilemap;
     private entityManager!: EntityManager;
     private player!: Player;
+    private npcs: NPC[] = [];
+    private turnManager!: TurnManager;
 
     constructor() {
         super('GameScene');
@@ -30,6 +33,12 @@ export class GameScene extends Scene {
 
         // Temporary: log world state so we can inspect the format
         console.log(buildWorldState(this.player, this.entityManager.getEntities()));
+
+        this.turnManager = new TurnManager(this.player, this.npcs);
+        this.turnManager.onRoundStart = (turn) => {
+            console.log(`--- Turn ${turn} ---`);
+            console.log(buildWorldState(this.player, this.entityManager.getEntities()));
+        };
     }
 
     // ── Tilemap ──────────────────────────────────────────────
@@ -132,6 +141,7 @@ export class GameScene extends Scene {
                 this, this.map, def.tile,
                 this.entityManager.isWalkable, def.name, def.tint,
             );
+            this.npcs.push(npc);
             this.entityManager.add(npc);
         }
     }
@@ -158,7 +168,7 @@ export class GameScene extends Scene {
 
     // ── Update loop ──────────────────────────────────────────
 
-    update(time: number, delta: number) {
-        this.entityManager.updateAll(time, delta);
+    update(_time: number, _delta: number) {
+        this.turnManager.updateVisuals(this.entityManager.getEntities());
     }
 }

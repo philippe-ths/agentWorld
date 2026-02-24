@@ -4,6 +4,8 @@ import { Entity, TilePos } from './Entity';
 export class Player extends Entity {
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
     private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
+    private _isTurn = false;
+    private _onAction: ((moved: boolean) => void) | null = null;
 
     constructor(
         scene: Scene,
@@ -16,8 +18,16 @@ export class Player extends Entity {
         this.wasd = scene.input.keyboard!.addKeys('W,A,S,D') as Record<string, Phaser.Input.Keyboard.Key>;
     }
 
+    /** Called by TurnManager — resolves after the player presses a direction key and the move animation finishes. */
+    awaitAction(): Promise<boolean> {
+        this._isTurn = true;
+        return new Promise(resolve => {
+            this._onAction = resolve;
+        });
+    }
+
     update(_time: number, _delta: number) {
-        if (this.isMoving) return;
+        if (!this._isTurn || this.isMoving || !this._onAction) return;
 
         let dx = 0;
         let dy = 0;
@@ -32,6 +42,11 @@ export class Player extends Entity {
         else if (left) { dx = -1; }
         else if (right) { dx = 1; }
 
-        this.moveTo(dx, dy);
+        if (dx === 0 && dy === 0) return;
+
+        const callback = this._onAction;
+        this._isTurn = false;
+        this._onAction = null;
+        this.moveToAsync(dx, dy).then(callback);
     }
 }

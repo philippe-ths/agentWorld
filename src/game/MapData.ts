@@ -26,12 +26,12 @@ function generateMap(width: number, height: number, seed = 42): number[][] {
         }
     }
 
-    // Place 10-15 water ponds
-    const pondCount = 10 + Math.floor(rng() * 6);
+    // Place 3-5 water ponds
+    const pondCount = 3 + Math.floor(rng() * 3);
     for (let p = 0; p < pondCount; p++) {
         const cx = 4 + Math.floor(rng() * (width - 8));
         const cy = 4 + Math.floor(rng() * (height - 8));
-        const radius = 2 + Math.floor(rng() * 4);
+        const radius = 1 + Math.floor(rng() * 3);
 
         for (let dy = -radius; dy <= radius; dy++) {
             for (let dx = -radius; dx <= radius; dx++) {

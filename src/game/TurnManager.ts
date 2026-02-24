@@ -8,7 +8,7 @@ import { EntityManager } from './entities/EntityManager';
 /** Number of commands an NPC can execute per turn (each command runs to completion). */
 export const NPC_COMMANDS_PER_TURN = 3;
 
-type TurnState = 'idle' | 'npc-turn';
+type TurnState = 'idle' | 'npc-turn' | 'paused';
 
 export class TurnManager {
     private npcs: NPC[];
@@ -18,6 +18,8 @@ export class TurnManager {
     private turnNumber = 0;
     private turnLabel!: Phaser.GameObjects.Text;
     private llm: LLMService;
+    private paused = false;
+    private pauseResolve: (() => void) | null = null;
 
     constructor(scene: Phaser.Scene, npcs: NPC[], entityManager: EntityManager) {
         this.npcs = npcs;
@@ -35,6 +37,8 @@ export class TurnManager {
 
         this.llm = new LLMService(this.turnLabel);
 
+        scene.input.keyboard!.on('keydown-P', () => this.togglePause());
+
         this.runLoop();
     }
 
@@ -47,8 +51,10 @@ export class TurnManager {
 
     private async runLoop() {
         while (true) {
+            await this.waitIfPaused();
             this.turnNumber++;
             for (const npc of this.npcs) {
+                await this.waitIfPaused();
                 this.state = 'npc-turn';
                 this.activeNpc = npc;
                 this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
@@ -104,6 +110,27 @@ export class TurnManager {
 
     private delay(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    togglePause() {
+        this.paused = !this.paused;
+        if (this.paused) {
+            this.turnLabel.setText('⏸ PAUSED (press P to resume)');
+            console.log('%c[TurnManager] Paused', 'color: #ffaa00; font-weight: bold');
+        } else {
+            console.log('%c[TurnManager] Resumed', 'color: #6bff6b; font-weight: bold');
+            if (this.pauseResolve) {
+                this.pauseResolve();
+                this.pauseResolve = null;
+            }
+        }
+    }
+
+    private waitIfPaused(): Promise<void> {
+        if (!this.paused) return Promise.resolve();
+        return new Promise(resolve => {
+            this.pauseResolve = resolve;
+        });
     }
 
     getState(): TurnState {

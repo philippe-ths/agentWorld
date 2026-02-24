@@ -33,6 +33,14 @@ export class NPC extends Entity {
         return false; // blocked
     }
 
+    /** Walk the full path to a target tile, step by step. Stops if blocked. */
+    async walkToAsync(target: TilePos): Promise<void> {
+        while (this.tilePos.x !== target.x || this.tilePos.y !== target.y) {
+            const moved = await this.stepTowardAsync(target);
+            if (!moved) break; // blocked, give up
+        }
+    }
+
     update(_time: number, _delta: number) {
         // No-op: NPC actions are driven by TurnManager
     }

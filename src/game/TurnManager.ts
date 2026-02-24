@@ -1,7 +1,6 @@
 import { NPC } from './entities/NPC';
 import { Entity } from './entities/Entity';
-
-export const NPC_ACTIONS_PER_TURN = 3;
+import { MAP_WIDTH, MAP_HEIGHT } from './MapData';
 
 type TurnState = 'idle' | 'npc-turn';
 
@@ -12,8 +11,8 @@ export class TurnManager {
     private turnNumber = 0;
     private turnLabel!: Phaser.GameObjects.Text;
 
-    /** Called before each NPC's turn — return actions from LLM in Phase 3. */
-    onNpcTurn?: (npc: NPC, actionsPerTurn: number) => Promise<void>;
+    /** Called for each NPC's turn — provides the NPC and expects the handler to move it. */
+    onNpcTurn?: (npc: NPC) => Promise<void>;
 
     constructor(scene: Phaser.Scene, npcs: NPC[]) {
         this.npcs = npcs;
@@ -47,10 +46,10 @@ export class TurnManager {
                 this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
 
                 if (this.onNpcTurn) {
-                    await this.onNpcTurn(npc, NPC_ACTIONS_PER_TURN);
+                    await this.onNpcTurn(npc);
                 } else {
-                    // Default: random walk so turns are visible
-                    await this.randomWalk(npc);
+                    // Default: random walk to a nearby tile
+                    await this.randomWalkTo(npc);
                 }
             }
 
@@ -61,13 +60,16 @@ export class TurnManager {
         }
     }
 
-    private async randomWalk(npc: NPC) {
+    /** Walk to a random tile 1-5 steps away, taking as many steps as needed. */
+    private async randomWalkTo(npc: NPC) {
         const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
-        for (let i = 0; i < NPC_ACTIONS_PER_TURN; i++) {
-            const dir = dirs[Math.floor(Math.random() * dirs.length)];
-            const target = { x: npc.tilePos.x + dir.x, y: npc.tilePos.y + dir.y };
-            await npc.stepTowardAsync(target);
-        }
+        const dir = dirs[Math.floor(Math.random() * dirs.length)];
+        const dist = 1 + Math.floor(Math.random() * 5);
+        const target = {
+            x: Math.max(0, Math.min(MAP_WIDTH - 1, npc.tilePos.x + dir.x * dist)),
+            y: Math.max(0, Math.min(MAP_HEIGHT - 1, npc.tilePos.y + dir.y * dist)),
+        };
+        await npc.walkToAsync(target);
     }
 
     private delay(ms: number): Promise<void> {

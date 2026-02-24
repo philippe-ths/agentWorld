@@ -1,6 +1,9 @@
 import { NPC } from './entities/NPC';
 import { Entity } from './entities/Entity';
-import { MAP_WIDTH, MAP_HEIGHT } from './MapData';
+import { LLMService } from './LLMService';
+import { parseDirectives, Directive } from './DirectiveParser';
+import { buildWorldState } from './WorldState';
+import { EntityManager } from './entities/EntityManager';
 
 /** Number of commands an NPC can execute per turn (each command runs to completion). */
 export const NPC_COMMANDS_PER_TURN = 3;
@@ -9,16 +12,16 @@ type TurnState = 'idle' | 'npc-turn';
 
 export class TurnManager {
     private npcs: NPC[];
+    private allEntities: EntityManager;
     private state: TurnState = 'idle';
     private activeNpc: NPC | null = null;
     private turnNumber = 0;
     private turnLabel!: Phaser.GameObjects.Text;
+    private llm: LLMService;
 
-    /** Called for each NPC's turn — should return an array of commands (up to NPC_COMMANDS_PER_TURN). */
-    onNpcTurn?: (npc: NPC) => Promise<void>;
-
-    constructor(scene: Phaser.Scene, npcs: NPC[]) {
+    constructor(scene: Phaser.Scene, npcs: NPC[], entityManager: EntityManager) {
         this.npcs = npcs;
+        this.allEntities = entityManager;
 
         this.turnLabel = scene.add.text(10, 10, '', {
             fontSize: '14px',
@@ -29,6 +32,8 @@ export class TurnManager {
         });
         this.turnLabel.setScrollFactor(0);
         this.turnLabel.setDepth(1000);
+
+        this.llm = new LLMService(this.turnLabel);
 
         this.runLoop();
     }
@@ -48,12 +53,7 @@ export class TurnManager {
                 this.activeNpc = npc;
                 this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
 
-                if (this.onNpcTurn) {
-                    await this.onNpcTurn(npc);
-                } else {
-                    // Default: issue random move commands
-                    await this.randomCommands(npc);
-                }
+                await this.runNpcTurn(npc);
             }
 
             this.state = 'idle';
@@ -63,17 +63,45 @@ export class TurnManager {
         }
     }
 
-    /** Issue N random move_to commands, each walking to completion before the next. */
-    private async randomCommands(npc: NPC) {
-        const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
-        for (let i = 0; i < NPC_COMMANDS_PER_TURN; i++) {
-            const dir = dirs[Math.floor(Math.random() * dirs.length)];
-            const dist = 1 + Math.floor(Math.random() * 5);
-            const target = {
-                x: Math.max(0, Math.min(MAP_WIDTH - 1, npc.tilePos.x + dir.x * dist)),
-                y: Math.max(0, Math.min(MAP_HEIGHT - 1, npc.tilePos.y + dir.y * dist)),
-            };
-            await npc.walkToAsync(target);
+    private async runNpcTurn(npc: NPC) {
+        let directives: Directive[];
+
+        try {
+            const worldState = buildWorldState(npc, this.allEntities.getEntities());
+            const response = await this.llm.decide(npc.name, worldState);
+            directives = parseDirectives(response);
+        } catch (err) {
+            const msg = (err as Error).message;
+            console.error(
+                `%c[TurnManager] LLM failed for ${npc.name}, falling back to wait(). Error: ${msg}`,
+                'color: #ff4444; font-weight: bold; font-size: 14px',
+            );
+            this.turnLabel.setText(`⚠ ${npc.name}: LLM error — waiting`);
+            directives = [{ type: 'wait' }];
+        }
+
+        // Cap at NPC_COMMANDS_PER_TURN
+        const capped = directives.slice(0, NPC_COMMANDS_PER_TURN);
+
+        for (const dir of capped) {
+            await this.executeDirective(npc, dir);
+        }
+    }
+
+    private async executeDirective(npc: NPC, dir: Directive) {
+        switch (dir.type) {
+            case 'move_to':
+                console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
+                await npc.walkToAsync({ x: dir.x, y: dir.y });
+                break;
+            case 'start_conversation_with':
+                console.log(`%c[${npc.name}] start_conversation_with(${dir.name})`, 'color: #ffff6b');
+                // TODO: implement conversation mechanic
+                break;
+            case 'wait':
+                console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
+                await this.delay(300);
+                break;
         }
     }
 

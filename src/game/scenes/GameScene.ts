@@ -34,7 +34,7 @@ export class GameScene extends Scene {
         // Temporary: log world state so we can inspect the format
         console.log(buildWorldState(this.player, this.entityManager.getEntities()));
 
-        this.turnManager = new TurnManager(this, this.npcs);
+        this.turnManager = new TurnManager(this, this.npcs, this.entityManager);
     }
 
     // ── Tilemap ──────────────────────────────────────────────

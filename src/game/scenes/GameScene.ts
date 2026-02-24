@@ -4,6 +4,7 @@ import { TILE_W, TILE_H } from '../entities/Entity';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
+import { buildWorldState } from '../WorldState';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -26,6 +27,9 @@ export class GameScene extends Scene {
 
         this.spawnNPCs();
         this.setupCamera();
+
+        // Temporary: log world state so we can inspect the format
+        console.log(buildWorldState(this.player, this.entityManager.getEntities()));
     }
 
     // ── Tilemap ──────────────────────────────────────────────

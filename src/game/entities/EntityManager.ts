@@ -19,6 +19,10 @@ export class EntityManager {
         return this.entities.some(e => e.tilePos.x === x && e.tilePos.y === y);
     }
 
+    getEntities(): Entity[] {
+        return this.entities;
+    }
+
     isWalkable = (x: number, y: number): boolean => {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
         if (MAP_DATA[y][x] === TILE_WATER) return false;

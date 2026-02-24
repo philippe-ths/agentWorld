@@ -49,17 +49,24 @@ export class TurnManager {
                 if (this.onNpcTurn) {
                     await this.onNpcTurn(npc, NPC_ACTIONS_PER_TURN);
                 } else {
-                    // Placeholder: NPCs wait (no LLM yet)
-                    for (let i = 0; i < NPC_ACTIONS_PER_TURN; i++) {
-                        await this.delay(50);
-                    }
+                    // Default: random walk so turns are visible
+                    await this.randomWalk(npc);
                 }
             }
 
             this.state = 'idle';
             this.activeNpc = null;
-            this.turnLabel.setText(`Turn ${this.turnNumber} — NPCs thinking...`);
-            await this.delay(100);
+            this.turnLabel.setText(`Turn ${this.turnNumber} complete`);
+            await this.delay(300);
+        }
+    }
+
+    private async randomWalk(npc: NPC) {
+        const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+        for (let i = 0; i < NPC_ACTIONS_PER_TURN; i++) {
+            const dir = dirs[Math.floor(Math.random() * dirs.length)];
+            const target = { x: npc.tilePos.x + dir.x, y: npc.tilePos.y + dir.y };
+            await npc.stepTowardAsync(target);
         }
     }
 

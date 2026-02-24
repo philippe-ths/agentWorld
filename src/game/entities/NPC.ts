@@ -1,5 +1,6 @@
 import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
+import { MAP_WIDTH, MAP_HEIGHT } from '../MapData';
 
 export class NPC extends Entity {
     constructor(
@@ -14,30 +15,66 @@ export class NPC extends Entity {
         this.sprite.setTint(tint);
     }
 
-    /** Take one step toward a target tile. Returns a promise that resolves when the animation finishes. */
-    async stepTowardAsync(target: TilePos): Promise<boolean> {
-        const dx = Math.sign(target.x - this.tilePos.x);
-        const dy = Math.sign(target.y - this.tilePos.y);
+    /** BFS pathfinding from current position to target. Returns the path (excluding start) or empty if unreachable. */
+    private findPath(target: TilePos): TilePos[] {
+        const start = this.tilePos;
+        if (start.x === target.x && start.y === target.y) return [];
 
-        if (dx === 0 && dy === 0) return false;
+        const key = (x: number, y: number) => `${x},${y}`;
+        const visited = new Set<string>();
+        visited.add(key(start.x, start.y));
 
-        // Prefer the axis with the greater distance
-        if (Math.abs(target.x - this.tilePos.x) >= Math.abs(target.y - this.tilePos.y)) {
-            if (dx !== 0 && await this.moveToAsync(dx, 0)) return true;
-            if (dy !== 0 && await this.moveToAsync(0, dy)) return true;
-        } else {
-            if (dy !== 0 && await this.moveToAsync(0, dy)) return true;
-            if (dx !== 0 && await this.moveToAsync(dx, 0)) return true;
+        const queue: { x: number; y: number; path: TilePos[] }[] = [
+            { x: start.x, y: start.y, path: [] },
+        ];
+
+        const dirs = [
+            { x: 1, y: 0 }, { x: -1, y: 0 },
+            { x: 0, y: 1 }, { x: 0, y: -1 },
+        ];
+
+        while (queue.length > 0) {
+            const curr = queue.shift()!;
+
+            for (const d of dirs) {
+                const nx = curr.x + d.x;
+                const ny = curr.y + d.y;
+
+                if (nx < 0 || nx >= MAP_WIDTH || ny < 0 || ny >= MAP_HEIGHT) continue;
+
+                const k = key(nx, ny);
+                if (visited.has(k)) continue;
+                visited.add(k);
+
+                const nextPath = [...curr.path, { x: nx, y: ny }];
+
+                if (nx === target.x && ny === target.y) return nextPath;
+
+                if (this.checkWalkable(nx, ny)) {
+                    queue.push({ x: nx, y: ny, path: nextPath });
+                }
+            }
         }
 
-        return false; // blocked
+        return []; // unreachable
     }
 
-    /** Walk the full path to a target tile, step by step. Stops if blocked. */
+    /** Walk the full BFS path to a target tile, step by step. */
     async walkToAsync(target: TilePos): Promise<void> {
-        while (this.tilePos.x !== target.x || this.tilePos.y !== target.y) {
-            const moved = await this.stepTowardAsync(target);
-            if (!moved) break; // blocked, give up
+        const path = this.findPath(target);
+        if (path.length === 0) {
+            console.warn(`%c[${this.name}] No path to (${target.x},${target.y})`, 'color: #ffaa00');
+            return;
+        }
+
+        for (const step of path) {
+            const dx = step.x - this.tilePos.x;
+            const dy = step.y - this.tilePos.y;
+            const moved = await this.moveToAsync(dx, dy);
+            if (!moved) {
+                console.warn(`%c[${this.name}] Blocked at (${this.tilePos.x},${this.tilePos.y})`, 'color: #ffaa00');
+                break;
+            }
         }
     }
 

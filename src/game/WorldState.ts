@@ -1,8 +1,6 @@
 import { Entity } from './entities/Entity';
 import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA } from './MapData';
 
-const VIEW_RADIUS = 3; // 7×7 local grid (3 in each direction)
-
 const TILE_CHARS: Record<number, string> = {
     0: '.',  // grass
     1: 'W',  // water
@@ -27,27 +25,22 @@ export function buildWorldState(observer: Entity, allEntities: Entity[]): string
         }
     }
 
-    // Local tile grid
+    // Full map grid
     lines.push('');
-    lines.push(`NEARBY (${VIEW_RADIUS * 2 + 1}x${VIEW_RADIUS * 2 + 1} around you, @ = you):`);
+    lines.push(`MAP (${MAP_WIDTH}x${MAP_HEIGHT}, @ = you):`);
 
-    // Build entity lookup for the local area
+    // Build entity lookup
     const entityAt = new Map<string, string>();
     for (const e of allEntities) {
         if (e === observer) continue;
         entityAt.set(`${e.tilePos.x},${e.tilePos.y}`, e.name[0]);
     }
 
-    for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) {
+    for (let y = 0; y < MAP_HEIGHT; y++) {
         const row: string[] = [];
-        for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
-            const x = observer.tilePos.x + dx;
-            const y = observer.tilePos.y + dy;
-
-            if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
-                row.push('#'); // out of bounds
-            } else if (dx === 0 && dy === 0) {
-                row.push('@'); // observer
+        for (let x = 0; x < MAP_WIDTH; x++) {
+            if (x === observer.tilePos.x && y === observer.tilePos.y) {
+                row.push('@');
             } else if (entityAt.has(`${x},${y}`)) {
                 row.push(entityAt.get(`${x},${y}`)!);
             } else {
@@ -59,7 +52,7 @@ export function buildWorldState(observer: Entity, allEntities: Entity[]): string
 
     // Legend
     lines.push('');
-    lines.push('LEGEND: . = grass, W = water, # = edge, @ = you');
+    lines.push('LEGEND: . = grass, W = water, @ = you');
     if (entityAt.size > 0) {
         const legend = others.map(e => `${e.name[0]} = ${e.name}`).join(', ');
         lines.push(`  ${legend}`);

@@ -39,7 +39,7 @@ export function buildWorldState(observer: Entity, allEntities: Entity[]): string
     lines.push('. = grass, ~ = water, @ = you, A/B/C = NPCs');
 
     lines.push('');
-    lines.push('ACTIONS: move_to(x,y) | start_conversation_with(name) | wait()');
+    lines.push('ACTIONS: move_to(x,y) | wait()');
 
     return lines.join('\n');
 }

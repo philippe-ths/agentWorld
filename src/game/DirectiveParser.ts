@@ -4,19 +4,13 @@ export interface MoveToDirective {
     y: number;
 }
 
-export interface StartConversationDirective {
-    type: 'start_conversation_with';
-    name: string;
-}
-
 export interface WaitDirective {
     type: 'wait';
 }
 
-export type Directive = MoveToDirective | StartConversationDirective | WaitDirective;
+export type Directive = MoveToDirective | WaitDirective;
 
 const MOVE_TO_RE = /^move_to\(\s*(\d+)\s*,\s*(\d+)\s*\)$/;
-const CONVO_RE = /^start_conversation_with\(\s*(.+?)\s*\)$/;
 const WAIT_RE = /^wait\(\s*\)$/;
 
 export function parseDirectives(text: string): Directive[] {
@@ -30,8 +24,6 @@ export function parseDirectives(text: string): Directive[] {
 
         if ((match = line.match(MOVE_TO_RE))) {
             directives.push({ type: 'move_to', x: parseInt(match[1]), y: parseInt(match[2]) });
-        } else if ((match = line.match(CONVO_RE))) {
-            directives.push({ type: 'start_conversation_with', name: match[1] });
         } else if (WAIT_RE.test(line)) {
             directives.push({ type: 'wait' });
         } else {

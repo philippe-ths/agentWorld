@@ -94,10 +94,6 @@ export class TurnManager {
                 console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
                 await npc.walkToAsync({ x: dir.x, y: dir.y });
                 break;
-            case 'start_conversation_with':
-                console.log(`%c[${npc.name}] start_conversation_with(${dir.name})`, 'color: #ffff6b');
-                // TODO: implement conversation mechanic
-                break;
             case 'wait':
                 console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
                 await this.delay(300);

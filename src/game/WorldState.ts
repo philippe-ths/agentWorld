@@ -36,7 +36,7 @@ export function buildWorldState(observer: Entity, allEntities: Entity[]): string
         }
         lines.push(row);
     }
-    lines.push('. = grass, ~ = water, @ = you, A/B/C = NPCs');
+    lines.push('. = grass (walkable), ~ = water (blocked), @ = you, P = player (blocked), A/B/C = NPCs (blocked)');
 
     lines.push('');
     lines.push('ACTIONS: move_to(x,y) | wait()');

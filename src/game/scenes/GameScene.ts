@@ -135,7 +135,9 @@ export class GameScene extends Scene {
         for (const def of npcDefs) {
             const npc = new NPC(
                 this, this.map, def.tile,
-                this.entityManager.isWalkable, def.name, def.tint,
+                this.entityManager.isWalkable,
+                this.entityManager.isTerrainWalkable,
+                def.name, def.tint,
             );
             this.npcs.push(npc);
             this.entityManager.add(npc);

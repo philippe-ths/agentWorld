@@ -1,43 +1,55 @@
 import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
+import { findPath } from '../Pathfinder';
+
+const MAX_REPATH_ATTEMPTS = 3;
 
 export class NPC extends Entity {
+    private checkTerrainWalkable: (x: number, y: number) => boolean;
+
     constructor(
         scene: Scene,
         map: Phaser.Tilemaps.Tilemap,
         startTile: TilePos,
         checkWalkable: (x: number, y: number) => boolean,
+        checkTerrainWalkable: (x: number, y: number) => boolean,
         name: string,
         tint: number,
     ) {
         super(scene, map, 'player', startTile, checkWalkable, name);
+        this.checkTerrainWalkable = checkTerrainWalkable;
         this.sprite.setTint(tint);
     }
 
-    /** Take one step toward a target tile. Returns a promise that resolves when the animation finishes. */
-    async stepTowardAsync(target: TilePos): Promise<boolean> {
-        const dx = Math.sign(target.x - this.tilePos.x);
-        const dy = Math.sign(target.y - this.tilePos.y);
-
-        if (dx === 0 && dy === 0) return false;
-
-        // Prefer the axis with the greater distance
-        if (Math.abs(target.x - this.tilePos.x) >= Math.abs(target.y - this.tilePos.y)) {
-            if (dx !== 0 && await this.moveToAsync(dx, 0)) return true;
-            if (dy !== 0 && await this.moveToAsync(0, dy)) return true;
-        } else {
-            if (dy !== 0 && await this.moveToAsync(0, dy)) return true;
-            if (dx !== 0 && await this.moveToAsync(dx, 0)) return true;
-        }
-
-        return false; // blocked
-    }
-
-    /** Walk the full path to a target tile, step by step. Stops if blocked. */
+    /** Walk the full path to a target tile using A* pathfinding. Re-paths if blocked by an entity. */
     async walkToAsync(target: TilePos): Promise<void> {
+        let repathCount = 0;
+
         while (this.tilePos.x !== target.x || this.tilePos.y !== target.y) {
-            const moved = await this.stepTowardAsync(target);
-            if (!moved) break; // blocked, give up
+            const path = findPath(this.tilePos, target, this.checkTerrainWalkable);
+
+            if (!path || path.length === 0) {
+                console.warn(`%c[${this.name}] No path to (${target.x}, ${target.y})`, 'color: #ffaa00');
+                return;
+            }
+
+            for (const step of path) {
+                if (this.tilePos.x === target.x && this.tilePos.y === target.y) return;
+
+                const dx = step.x - this.tilePos.x;
+                const dy = step.y - this.tilePos.y;
+                const moved = await this.moveToAsync(dx, dy);
+
+                if (!moved) {
+                    // Blocked by an entity — re-path from current position
+                    repathCount++;
+                    if (repathCount > MAX_REPATH_ATTEMPTS) {
+                        console.warn(`%c[${this.name}] Re-path limit reached heading to (${target.x}, ${target.y})`, 'color: #ffaa00');
+                        return;
+                    }
+                    break;
+                }
+            }
         }
     }
 

@@ -29,4 +29,10 @@ export class EntityManager {
         if (this.isTileOccupied(x, y)) return false;
         return true;
     };
+
+    isTerrainWalkable = (x: number, y: number): boolean => {
+        if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
+        if (MAP_DATA[y][x] === TILE_WATER) return false;
+        return true;
+    };
 }

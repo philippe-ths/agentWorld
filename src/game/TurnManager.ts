@@ -2,6 +2,9 @@ import { NPC } from './entities/NPC';
 import { Entity } from './entities/Entity';
 import { MAP_WIDTH, MAP_HEIGHT } from './MapData';
 
+/** Number of commands an NPC can execute per turn (each command runs to completion). */
+export const NPC_COMMANDS_PER_TURN = 3;
+
 type TurnState = 'idle' | 'npc-turn';
 
 export class TurnManager {
@@ -11,7 +14,7 @@ export class TurnManager {
     private turnNumber = 0;
     private turnLabel!: Phaser.GameObjects.Text;
 
-    /** Called for each NPC's turn — provides the NPC and expects the handler to move it. */
+    /** Called for each NPC's turn — should return an array of commands (up to NPC_COMMANDS_PER_TURN). */
     onNpcTurn?: (npc: NPC) => Promise<void>;
 
     constructor(scene: Phaser.Scene, npcs: NPC[]) {
@@ -48,8 +51,8 @@ export class TurnManager {
                 if (this.onNpcTurn) {
                     await this.onNpcTurn(npc);
                 } else {
-                    // Default: random walk to a nearby tile
-                    await this.randomWalkTo(npc);
+                    // Default: issue random move commands
+                    await this.randomCommands(npc);
                 }
             }
 
@@ -60,16 +63,18 @@ export class TurnManager {
         }
     }
 
-    /** Walk to a random tile 1-5 steps away, taking as many steps as needed. */
-    private async randomWalkTo(npc: NPC) {
+    /** Issue N random move_to commands, each walking to completion before the next. */
+    private async randomCommands(npc: NPC) {
         const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
-        const dir = dirs[Math.floor(Math.random() * dirs.length)];
-        const dist = 1 + Math.floor(Math.random() * 5);
-        const target = {
-            x: Math.max(0, Math.min(MAP_WIDTH - 1, npc.tilePos.x + dir.x * dist)),
-            y: Math.max(0, Math.min(MAP_HEIGHT - 1, npc.tilePos.y + dir.y * dist)),
-        };
-        await npc.walkToAsync(target);
+        for (let i = 0; i < NPC_COMMANDS_PER_TURN; i++) {
+            const dir = dirs[Math.floor(Math.random() * dirs.length)];
+            const dist = 1 + Math.floor(Math.random() * 5);
+            const target = {
+                x: Math.max(0, Math.min(MAP_WIDTH - 1, npc.tilePos.x + dir.x * dist)),
+                y: Math.max(0, Math.min(MAP_HEIGHT - 1, npc.tilePos.y + dir.y * dist)),
+            };
+            await npc.walkToAsync(target);
+        }
     }
 
     private delay(ms: number): Promise<void> {

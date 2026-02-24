@@ -54,12 +54,13 @@ export class TurnManager {
                 this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
 
                 await this.runNpcTurn(npc);
+                await this.delay(2000);
             }
 
             this.state = 'idle';
             this.activeNpc = null;
             this.turnLabel.setText(`Turn ${this.turnNumber} complete`);
-            await this.delay(300);
+            await this.delay(2000);
         }
     }
 

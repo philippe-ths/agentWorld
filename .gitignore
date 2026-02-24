@@ -24,5 +24,6 @@ dist-ssr
 *.sw?
 
 # Server secrets
+.env
 server/.env
 server/data/

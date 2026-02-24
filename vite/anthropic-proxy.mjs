@@ -1,8 +1,25 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+// Load .env into process.env
+try {
+    const envPath = resolve(import.meta.dirname, '..', '.env');
+    const envFile = readFileSync(envPath, 'utf-8');
+    for (const line of envFile.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim();
+        if (!process.env[key]) process.env[key] = val;
+    }
+} catch { /* .env file missing — rely on env vars */ }
 
 /**
  * Vite plugin that adds a POST /api/chat endpoint proxying to Anthropic Claude.
- * Reads ANTHROPIC_API_KEY from process.env (set it before running `npm run dev`).
+ * Reads ANTHROPIC_API_KEY from .env file.
  */
 export function anthropicProxy() {
     return {

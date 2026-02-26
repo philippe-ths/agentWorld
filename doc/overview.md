@@ -1,6 +1,6 @@
 # Agent World
 
-A Phaser 3 isometric game where NPCs are driven by an LLM (Anthropic Claude). The player moves freely on a 30x30 tile map while 3 NPCs take turns deciding what to do via Claude.
+A Phaser 3 isometric game where NPCs are driven by an LLM (Anthropic Claude). The player moves freely on a 30x30 tile map while 3 NPCs take turns deciding what to do via Claude. NPCs maintain a chronological log of their observations and actions, giving them memory of past turns.
 
 ## Tech Stack
 

@@ -4,6 +4,7 @@ import { LLMService } from './LLMService';
 import { parseDirectives, Directive } from './DirectiveParser';
 import { buildWorldState } from './WorldState';
 import { EntityManager } from './entities/EntityManager';
+import { ChronologicalLog, SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET } from './ChronologicalLog';
 
 /** Number of commands an NPC can execute per turn (each command runs to completion). */
 export const NPC_COMMANDS_PER_TURN = 3;
@@ -20,6 +21,7 @@ export class TurnManager {
     private llm: LLMService;
     private paused = false;
     private pauseResolve: (() => void) | null = null;
+    private logs = new Map<string, ChronologicalLog>();
 
     constructor(scene: Phaser.Scene, npcs: NPC[], entityManager: EntityManager) {
         this.npcs = npcs;
@@ -38,6 +40,22 @@ export class TurnManager {
         this.llm = new LLMService(this.turnLabel);
 
         scene.input.keyboard!.on('keydown-P', () => this.togglePause());
+
+        this.initAndRun();
+    }
+
+    private async initAndRun() {
+        for (const npc of this.npcs) {
+            const log = new ChronologicalLog(npc.name);
+            await log.load();
+            this.logs.set(npc.name, log);
+        }
+
+        // Resume turn counter from persisted logs
+        for (const log of this.logs.values()) {
+            const last = log.getLastTurnNumber();
+            if (last > this.turnNumber) this.turnNumber = last;
+        }
 
         this.runLoop();
     }
@@ -71,11 +89,22 @@ export class TurnManager {
     }
 
     private async runNpcTurn(npc: NPC) {
+        const log = this.logs.get(npc.name)!;
+        const entities = this.allEntities.getEntities();
+
+        // Record observations for this turn
+        log.startTurn(
+            this.turnNumber,
+            npc.tilePos,
+            entities.map(e => ({ name: e.name, tilePos: e.tilePos })),
+        );
+
         let directives: Directive[];
 
         try {
-            const worldState = buildWorldState(npc, this.allEntities.getEntities());
-            const response = await this.llm.decide(npc.name, worldState);
+            const worldState = buildWorldState(npc, entities);
+            const memory = log.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
+            const response = await this.llm.decide(npc.name, worldState, memory);
             directives = parseDirectives(response);
         } catch (err) {
             const msg = (err as Error).message;
@@ -91,19 +120,25 @@ export class TurnManager {
         const capped = directives.slice(0, NPC_COMMANDS_PER_TURN);
 
         for (const dir of capped) {
-            await this.executeDirective(npc, dir);
+            await this.executeDirective(npc, dir, log);
         }
+
+        // Persist log to disk, then try summarization
+        await log.save();
+        await log.maybeSummarize(SUMMARIZE_EVERY_N_TURNS);
     }
 
-    private async executeDirective(npc: NPC, dir: Directive) {
+    private async executeDirective(npc: NPC, dir: Directive, log: ChronologicalLog) {
         switch (dir.type) {
             case 'move_to':
                 console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
                 await npc.walkToAsync({ x: dir.x, y: dir.y });
+                log.recordAction(`I moved to (${npc.tilePos.x},${npc.tilePos.y})`);
                 break;
             case 'wait':
                 console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
                 await this.delay(300);
+                log.recordAction('I waited');
                 break;
         }
     }

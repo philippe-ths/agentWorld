@@ -12,6 +12,7 @@ src/
     LLMService.ts          Client-side LLM caller — sends prompts, logs I/O to console
     DirectiveParser.ts     Parses LLM text responses into typed directive objects
     TurnManager.ts         Orchestrates NPC turn loop, executes directives, pause/resume
+    ChronologicalLog.ts    Per-NPC memory — records observations/actions, summarizes old turns
     entities/
       Entity.ts            Abstract base — sprite, tile movement, name label, depth sort
       Player.ts            Keyboard-controlled entity (arrows / WASD)
@@ -24,6 +25,10 @@ vite/
   config.dev.mjs           Dev config — includes Anthropic proxy plugin
   config.prod.mjs          Production build config
   anthropic-proxy.mjs      Vite server plugin — proxies /api/chat to Anthropic API
+  log-io.mjs               Vite server plugin — reads/writes per-NPC log .md files
+  summarize-proxy.mjs      Vite server plugin — proxies /api/summarize for log compression
+data/
+  logs/                    Per-NPC chronological log files (generated at runtime, gitignored)
 ```
 
 ## Scene Flow
@@ -51,11 +56,15 @@ Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, s
 
 `TurnManager` runs an async loop that cycles through NPCs sequentially (Ada → Bjorn → Cora). For each NPC's turn:
 
-1. Build world state text via `WorldState.buildWorldState()`
-2. Send to Claude via `LLMService.decide()`
-3. Parse response into directives via `DirectiveParser.parseDirectives()`
-4. Execute up to 3 directives (commands) — each runs to completion before the next
-5. Wait 5 seconds before the next NPC's turn
+1. Record observations to the NPC's chronological log (position, visible entities)
+2. Build world state text via `WorldState.buildWorldState()`
+3. Build memory content from the log via `ChronologicalLog.buildPromptContent()`
+4. Send world state + memory to Claude via `LLMService.decide()`
+5. Parse response into directives via `DirectiveParser.parseDirectives()`
+6. Execute up to 3 directives — each runs to completion before the next; record each action to the log
+7. Save the log to disk
+8. Trigger summarization of old entries if enough have accumulated
+9. Wait 5 seconds before the next NPC's turn
 
 The player is **not** part of the turn system and can move at any time.
 
@@ -72,7 +81,9 @@ Press **P** to pause/resume the NPC turn loop.
 
 ### Client Side
 
-`LLMService` sends the system prompt + world state to `/api/chat` and returns the raw text response. All prompts and responses are logged to the browser console with colored formatting.
+`LLMService` sends the system prompt, optional memory (as a prior conversation turn), and the world state to `/api/chat` and returns the raw text response. All prompts, memory, and responses are logged to the browser console with colored formatting.
+
+`ChronologicalLog` manages per-NPC memory. It records observations and actions each turn, serializes them to Markdown files on disk via the log I/O endpoint, and builds budget-constrained prompt content for the LLM.
 
 ### Directives
 
@@ -107,3 +118,32 @@ ACTIONS: move_to(x,y) | wait()
 ```
 
 Entities are overlaid on the map grid using single characters. The format is ~950 characters total for a 30x30 map.
+
+## NPC Memory
+
+Each NPC maintains a chronological log file at `data/logs/chronological-{Name}.md`. The log records observations (position, visible entities) and executed actions each turn.
+
+### Log Format
+
+```markdown
+## Summary (Turns 1-5)
+I explored the northeast quadrant, moving from (15,10) to (22,16). I saw Player near (5,5) and Bjorn heading south...
+
+## Turn 6
+- I am at (22,16)
+- I can see: Player at (6,7), Bjorn at (23,18), Cora at (12,24)
+- I moved to (24,18)
+- I waited
+```
+
+### Summarization
+
+Every 5 turns (configurable via `SUMMARIZE_EVERY_N_TURNS`), the oldest unsummarized entries are compressed into a paragraph via the `/api/summarize` endpoint. The most recent 5 turns always stay in full detail. This gives NPCs detailed recent memory and increasingly compressed older memory.
+
+### Token Budget
+
+The log content injected into the prompt is capped at 4000 characters (`LOG_CHAR_BUDGET`). If the total exceeds the budget, the oldest summaries are dropped first, then the oldest full entries.
+
+### Persistence
+
+Log files persist across server restarts via the `log-io.mjs` Vite plugin, which provides `GET /api/logs/:name` and `POST /api/logs/:name` endpoints.

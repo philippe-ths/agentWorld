@@ -27,3 +27,6 @@ dist-ssr
 .env
 server/.env
 server/data/
+
+# NPC log files (generated at runtime)
+data/logs/chronological-*.md

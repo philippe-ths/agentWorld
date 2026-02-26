@@ -13,11 +13,15 @@ Turn 2: Ada → (5s) → Bjorn → (5s) → Cora → (5s) → "Turn 2 complete" 
 ```
 
 Each NPC turn:
-1. Build world state from the NPC's perspective
-2. Call the LLM for a decision
-3. Parse the response into directives
-4. Execute up to 3 commands, each running to completion
-5. Wait 5 seconds before the next NPC
+1. Record observations to the NPC's chronological log
+2. Build world state from the NPC's perspective
+3. Build memory content from the log (budget-capped)
+4. Call the LLM for a decision (world state + memory)
+5. Parse the response into directives
+6. Execute up to 3 commands, recording each action to the log
+7. Save the log to disk
+8. Summarize old log entries if enough have accumulated
+9. Wait 5 seconds before the next NPC
 
 ## Commands
 
@@ -47,6 +51,7 @@ A fixed label in the top-left corner shows:
 
 | File | Role |
 |------|------|
-| `src/game/TurnManager.ts` | Turn loop, directive execution, pause control |
+| `src/game/TurnManager.ts` | Turn loop, directive execution, log integration, pause control |
+| `src/game/ChronologicalLog.ts` | Per-NPC memory — recording, serialization, summarization |
 | `src/game/entities/NPC.ts` | `walkToAsync()`, `stepTowardAsync()` |
 | `src/game/entities/Entity.ts` | `moveToAsync()` — single-tile animated move |

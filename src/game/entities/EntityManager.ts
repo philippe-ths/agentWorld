@@ -23,6 +23,10 @@ export class EntityManager {
         return this.entities;
     }
 
+    getByName(name: string): Entity | undefined {
+        return this.entities.find(e => e.name === name);
+    }
+
     isWalkable = (x: number, y: number): boolean => {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
         if (MAP_DATA[y][x] === TILE_WATER) return false;

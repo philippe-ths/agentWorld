@@ -1,10 +1,12 @@
 import { NPC } from './entities/NPC';
+import { Player } from './entities/Player';
 import { Entity } from './entities/Entity';
 import { LLMService } from './LLMService';
 import { parseDirectives, Directive } from './DirectiveParser';
 import { buildWorldState } from './WorldState';
 import { EntityManager } from './entities/EntityManager';
 import { ChronologicalLog, SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET } from './ChronologicalLog';
+import { ConversationManager } from './ConversationManager';
 
 /** Number of commands an NPC can execute per turn (each command runs to completion). */
 export const NPC_COMMANDS_PER_TURN = 3;
@@ -22,6 +24,11 @@ export class TurnManager {
     private paused = false;
     private pauseResolve: (() => void) | null = null;
     private logs = new Map<string, ChronologicalLog>();
+
+    // Conversation integration
+    private conversationPaused = false;
+    private conversationResolve: (() => void) | null = null;
+    private conversationManager!: ConversationManager;
 
     constructor(scene: Phaser.Scene, npcs: NPC[], entityManager: EntityManager) {
         this.npcs = npcs;
@@ -58,6 +65,11 @@ export class TurnManager {
         }
 
         this.runLoop();
+    }
+
+    /** Inject the ConversationManager once it's created by the scene. */
+    setConversationManager(cm: ConversationManager) {
+        this.conversationManager = cm;
     }
 
     /** Called every frame — keeps label positions updated and player moving. */
@@ -120,7 +132,9 @@ export class TurnManager {
         const capped = directives.slice(0, NPC_COMMANDS_PER_TURN);
 
         for (const dir of capped) {
-            await this.executeDirective(npc, dir, log);
+            await this.waitIfConversationPaused();
+            const shouldStop = await this.executeDirective(npc, dir, log);
+            if (shouldStop) break;
         }
 
         // Persist log to disk, then try summarization
@@ -128,18 +142,29 @@ export class TurnManager {
         await log.maybeSummarize(SUMMARIZE_EVERY_N_TURNS);
     }
 
-    private async executeDirective(npc: NPC, dir: Directive, log: ChronologicalLog) {
+    private async executeDirective(npc: NPC, dir: Directive, log: ChronologicalLog): Promise<boolean> {
         switch (dir.type) {
             case 'move_to':
                 console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
                 await npc.walkToAsync({ x: dir.x, y: dir.y });
                 log.recordAction(`I moved to (${npc.tilePos.x},${npc.tilePos.y})`);
-                break;
+                return false;
             case 'wait':
                 console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
                 await this.delay(300);
                 log.recordAction('I waited');
-                break;
+                return false;
+            case 'start_conversation_with':
+                console.log(`%c[${npc.name}] start_conversation_with(${dir.targetName}, ${dir.message})`, 'color: #ff9f43');
+                log.recordAction(`I started a conversation with ${dir.targetName}`);
+                await this.conversationManager.startNpcConversation(
+                    npc, dir.targetName, dir.message, this.turnNumber,
+                );
+                return true; // End turn after conversation
+            case 'end_conversation':
+                // Should only appear inside a conversation response, not as a turn directive
+                console.warn(`%c[${npc.name}] end_conversation() used outside conversation`, 'color: #ffaa00');
+                return false;
         }
     }
 
@@ -168,6 +193,33 @@ export class TurnManager {
         });
     }
 
+    pauseForConversation(): void {
+        this.conversationPaused = true;
+    }
+
+    resumeFromConversation(): void {
+        this.conversationPaused = false;
+        if (this.conversationResolve) {
+            this.conversationResolve();
+            this.conversationResolve = null;
+        }
+    }
+
+    private waitIfConversationPaused(): Promise<void> {
+        if (!this.conversationPaused) return Promise.resolve();
+        return new Promise(resolve => {
+            this.conversationResolve = resolve;
+        });
+    }
+
+    /** Called by GameScene when the player presses the interact key next to an NPC. */
+    async playerInitiateConversation(player: Player, target: NPC): Promise<void> {
+        if (this.conversationManager.isInConversation()) return;
+        this.pauseForConversation();
+        await this.conversationManager.startPlayerConversation(player, target, this.turnNumber);
+        this.resumeFromConversation();
+    }
+
     getState(): TurnState {
         return this.state;
     }
@@ -178,5 +230,13 @@ export class TurnManager {
 
     getTurnNumber(): number {
         return this.turnNumber;
+    }
+
+    getLogs(): Map<string, ChronologicalLog> {
+        return this.logs;
+    }
+
+    getLlm(): LLMService {
+        return this.llm;
     }
 }

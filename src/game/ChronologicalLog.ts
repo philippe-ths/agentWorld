@@ -184,6 +184,32 @@ export class ChronologicalLog {
         await this.save();
     }
 
+    recordConversation(transcript: {
+        partnerName: string;
+        turnNumber: number;
+        location: { x: number; y: number };
+        initiatedBy: string;
+        messages: { speaker: string; text: string }[];
+        endedBy: string;
+    }): void {
+        const lines: string[] = [];
+        lines.push(`### Conversation with ${transcript.partnerName} (Turn ${transcript.turnNumber})`);
+        lines.push(`Location: (${transcript.location.x}, ${transcript.location.y})`);
+        lines.push(`Initiated by: ${transcript.initiatedBy}`);
+        lines.push('');
+        for (const msg of transcript.messages) {
+            lines.push(`${msg.speaker}: ${msg.text}`);
+        }
+        lines.push(`[Conversation ended by ${transcript.endedBy}]`);
+
+        if (this.currentEntry) {
+            this.currentEntry.lines.push(lines.join('\n'));
+        } else {
+            // No current turn entry — create a standalone entry
+            this.entries.push({ turnNumber: transcript.turnNumber, lines });
+        }
+    }
+
     getLastTurnNumber(): number {
         let last = 0;
         for (const s of this.summaries) {

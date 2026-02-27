@@ -7,6 +7,9 @@ const MAX_REPATH_ATTEMPTS = 3;
 export class NPC extends Entity {
     private checkTerrainWalkable: (x: number, y: number) => boolean;
 
+    /** Set by TurnManager to enable mid-walk pause for player conversations. */
+    conversationPauseGate: (() => Promise<void>) | null = null;
+
     constructor(
         scene: Scene,
         map: Phaser.Tilemaps.Tilemap,
@@ -35,6 +38,9 @@ export class NPC extends Entity {
 
             for (const step of path) {
                 if (this.tilePos.x === target.x && this.tilePos.y === target.y) return;
+
+                // Check for conversation pause between steps
+                if (this.conversationPauseGate) await this.conversationPauseGate();
 
                 const dx = step.x - this.tilePos.x;
                 const dy = step.y - this.tilePos.y;

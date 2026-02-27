@@ -6,6 +6,9 @@ import { NPC } from '../entities/NPC';
 import { EntityManager } from '../entities/EntityManager';
 import { buildWorldState } from '../WorldState';
 import { TurnManager } from '../TurnManager';
+import { ConversationManager } from '../ConversationManager';
+import { showSpeechBubble } from '../ui/SpeechBubble';
+import { DialogueBox } from '../ui/DialogueBox';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -15,6 +18,9 @@ export class GameScene extends Scene {
     private player!: Player;
     private npcs: NPC[] = [];
     private turnManager!: TurnManager;
+    private conversationManager!: ConversationManager;
+    private dialogueBox!: DialogueBox;
+    private interactKey!: Phaser.Input.Keyboard.Key;
 
     constructor() {
         super('GameScene');
@@ -35,6 +41,37 @@ export class GameScene extends Scene {
         console.log(buildWorldState(this.player, this.entityManager.getEntities()));
 
         this.turnManager = new TurnManager(this, this.npcs, this.entityManager);
+
+        // Set up dialogue box UI
+        this.dialogueBox = new DialogueBox(this);
+
+        // Set up ConversationManager with callbacks
+        this.conversationManager = new ConversationManager(
+            this.entityManager,
+            this.turnManager.getLlm(),
+            this.turnManager.getLogs(),
+            {
+                showSpeechBubble: (entity, text, duration) =>
+                    showSpeechBubble(this, entity, text, duration),
+                openDialogue: (targetName) => this.dialogueBox.open(targetName),
+                closeDialogue: () => this.dialogueBox.close(),
+                addDialogueMessage: (speaker, text) => this.dialogueBox.addMessage(speaker, text),
+            },
+        );
+        this.turnManager.setConversationManager(this.conversationManager);
+
+        // Wire dialogue box events
+        this.dialogueBox.onSubmit((text) => this.conversationManager.submitPlayerMessage(text));
+        this.dialogueBox.onClose(() => this.conversationManager.closePlayerDialogue());
+
+        // Wire NPC conversation pause gates
+        for (const npc of this.npcs) {
+            npc.conversationPauseGate = () => this.turnManager['waitIfConversationPaused']();
+        }
+
+        // Enter key to initiate conversation
+        this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+        this.interactKey.on('down', () => this.tryStartPlayerConversation());
     }
 
     // ── Tilemap ──────────────────────────────────────────────
@@ -167,7 +204,48 @@ export class GameScene extends Scene {
     // ── Update loop ──────────────────────────────────────────
 
     update(time: number, delta: number) {
-        this.player.update(time, delta);
+        // Suppress player movement while in a conversation
+        if (!this.dialogueBox.isOpen()) {
+            this.player.update(time, delta);
+        }
         this.turnManager.updateVisuals(this.entityManager.getEntities());
+    }
+
+    // ── Player conversation ──────────────────────────────────
+
+    private tryStartPlayerConversation(): void {
+        if (this.dialogueBox.isOpen()) return;
+        if (this.conversationManager.isInConversation()) return;
+
+        // Find an adjacent NPC, prefer the one in the direction the player is facing
+        const adjacentNpc = this.findAdjacentNpc();
+        if (!adjacentNpc) return;
+
+        this.turnManager.playerInitiateConversation(this.player, adjacentNpc);
+    }
+
+    private findAdjacentNpc(): NPC | null {
+        const facing = this.player.lastDirection;
+        const pos = this.player.tilePos;
+
+        // Direction offsets in order of preference: facing direction first
+        const offsets: Record<string, { dx: number; dy: number }> = {
+            up: { dx: 0, dy: -1 },
+            down: { dx: 0, dy: 1 },
+            left: { dx: -1, dy: 0 },
+            right: { dx: 1, dy: 0 },
+        };
+
+        const facingOffset = offsets[facing];
+        const orderedOffsets = [facingOffset, ...Object.values(offsets).filter(o => o !== facingOffset)];
+
+        for (const offset of orderedOffsets) {
+            const tx = pos.x + offset.dx;
+            const ty = pos.y + offset.dy;
+            const npc = this.npcs.find(n => n.tilePos.x === tx && n.tilePos.y === ty);
+            if (npc) return npc;
+        }
+
+        return null;
     }
 }

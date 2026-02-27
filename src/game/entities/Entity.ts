@@ -148,6 +148,12 @@ export abstract class Entity {
         });
     }
 
+    isAdjacentTo(other: Entity): boolean {
+        const dx = Math.abs(this.tilePos.x - other.tilePos.x);
+        const dy = Math.abs(this.tilePos.y - other.tilePos.y);
+        return (dx + dy) === 1;
+    }
+
     abstract update(time: number, delta: number): void;
 
     destroy() {

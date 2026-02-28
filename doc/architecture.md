@@ -13,6 +13,7 @@ src/
     DirectiveParser.ts     Parses LLM text responses into typed directive objects
     TurnManager.ts         Orchestrates NPC turn loop, executes directives, pause/resume
     ChronologicalLog.ts    Per-NPC memory — records observations/actions, summarizes old turns
+    ConversationManager.ts NPC-NPC and Player-NPC conversation orchestrator
     entities/
       Entity.ts            Abstract base — sprite, tile movement, name label, depth sort
       Player.ts            Keyboard-controlled entity (arrows / WASD)
@@ -21,6 +22,9 @@ src/
     scenes/
       Preloader.ts         Loads sprite sheet, generates tile textures, then starts GameScene
       GameScene.ts         Builds tilemap, spawns player + 3 NPCs, sets up camera & TurnManager
+    ui/
+      SpeechBubble.ts      NPC speech bubble rendering (white rounded-rect with arrow)
+      DialogueBox.ts       Player dialogue panel with hybrid Phaser/HTML text input
 vite/
   config.dev.mjs           Dev config — includes Anthropic proxy plugin
   config.prod.mjs          Production build config
@@ -43,10 +47,12 @@ Preloader loads the `player.png` sprite sheet and generates isometric diamond te
 
 `Entity` is the abstract base class. It creates a sprite at a tile position, handles animated tile-to-tile movement via tweens, and displays a name label.
 
-- **Player** — reads keyboard input each frame, calls `moveTo()` on key press. Moves freely at any time (not part of the turn system).
-- **NPC** — driven by LLM via `TurnManager`. Has `walkToAsync()` for full-path movement and `stepTowardAsync()` for single-step pathfinding.
+- **Player** — reads keyboard input each frame, calls `moveTo()` on key press. Moves freely at any time (not part of the turn system). Can initiate conversations with adjacent NPCs via **Enter**.
+- **NPC** — driven by LLM via `TurnManager`. Has `walkToAsync()` for full-path movement and `stepTowardAsync()` for single-step pathfinding. Movement is gated during active conversations.
 
-`EntityManager` stores all entities, runs their `update()` each frame, and provides the `isWalkable()` check (bounds + water + occupied tiles).
+`Entity` provides `isAdjacentTo(other)` for proximity checks (used by the conversation system).
+
+`EntityManager` stores all entities, runs their `update()` each frame, provides `isWalkable()` (bounds + water + occupied tiles), and `getByName()` for entity lookup.
 
 ## Map
 
@@ -90,6 +96,8 @@ Press **P** to pause/resume the NPC turn loop.
 `DirectiveParser` extracts structured commands from the LLM text response:
 - `move_to(x,y)` — walk to a tile coordinate
 - `wait()` — do nothing
+- `start_conversation_with(Name, message)` — begin a conversation with an adjacent entity
+- `end_conversation()` — end the current conversation
 
 Unknown lines are logged as warnings.
 
@@ -114,10 +122,14 @@ YOU: Ada at (15,10)
 [30 rows of 30 characters — one per tile]
 . = grass (walkable), ~ = water (blocked), @ = you, P = player (blocked), A/B/C = NPCs (blocked)
 
-ACTIONS: move_to(x,y) | wait()
+ACTIONS: move_to(x,y) | wait() | start_conversation_with(Name, message) | end_conversation()
 ```
 
 Entities are overlaid on the map grid using single characters. The format is ~950 characters total for a 30x30 map.
+
+## Conversations
+
+NPCs can hold conversations with each other (shown via speech bubbles) and with the player (via a dialogue box). Conversations pause the turn system and resume when they finish. See [conversations.md](conversations.md) for full details.
 
 ## NPC Memory
 
@@ -139,6 +151,8 @@ I explored the northeast quadrant, moving from (15,10) to (22,16). I saw Player 
 ### Summarization
 
 Every 5 turns (configurable via `SUMMARIZE_EVERY_N_TURNS`), the oldest unsummarized entries are compressed into a paragraph via the `/api/summarize` endpoint. The most recent 5 turns always stay in full detail. This gives NPCs detailed recent memory and increasingly compressed older memory.
+
+Conversation transcripts are also recorded in the log — for NPC-NPC conversations both participants get the transcript, for player conversations only the NPC's log is updated.
 
 ### Token Budget
 

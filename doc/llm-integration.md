@@ -22,12 +22,14 @@ Use it to avoid revisiting the same areas and to make informed exploration decis
 You are a helpful NPC — you explore the world.
 
 Available commands (you get up to 3 per turn):
-  move_to(x,y) — walk to tile (x,y)
+  move_to(x,y) — walk to tile (x,y), you don’t have to specify the path, just the destination.
   wait()       — do nothing this action
+  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation
+  end_conversation() — end the current conversation
 
 Respond ONLY with commands, one per line. No commentary. Example:
 move_to(12,8)
-move_to(5,14)
+start_conversation_with(Bjorn, I noticed something at the eastern pond)
 wait()
 ```
 
@@ -52,7 +54,7 @@ YOU: Ada at (15,10)
 [... 30 rows total ...]
 . = grass (walkable), ~ = water (blocked), @ = you, P = player (blocked), A/B/C = NPCs (blocked)
 
-ACTIONS: move_to(x,y) | wait()
+ACTIONS: move_to(x,y) | wait() | start_conversation_with(Name, message) | end_conversation()
 ```
 
 ## Directives
@@ -63,8 +65,35 @@ The LLM responds with up to 3 commands, one per line:
 |-----------|-------------|
 | `move_to(x,y)` | Walk to tile (x,y), full path step-by-step |
 | `wait()` | Do nothing for this action |
+| `start_conversation_with(Name, message)` | Start a conversation with an adjacent entity (ends the turn) |
+| `end_conversation()` | End the current conversation |
 
-Each command runs to completion before the next one starts.
+Each command runs to completion before the next one starts. `start_conversation_with` stops the turn immediately.
+
+## Conversation LLM Flow
+
+During a conversation, NPCs use a separate prompt and a separate method (`LLMService.converse()` instead of `decide()`).
+
+### Conversation System Prompt
+
+```
+You are an NPC in a conversation with another entity.
+Respond in character. Be concise.
+The purpose of conversation is to exchange useful information.
+Do not make idle small talk. If you have nothing important to say, end the conversation.
+Keep your responses to 1-2 sentences.
+Do not communicate positions or map features.
+
+Respond with ONE of:
+  say(your message here)
+  end_conversation()
+```
+
+### Conversation Request
+
+The `converse()` method sends the conversation system prompt, the NPC’s world state, optional memory, and the conversation history formatted as alternating speaker lines. The LLM responds with either `say(message)` or `end_conversation()`.
+
+See [conversations.md](conversations.md) for the full conversation lifecycle.
 
 ## API Proxy
 
@@ -146,6 +175,7 @@ All prompts and responses are logged to the browser console:
 - **Purple (light)** `Memory:` — chronological log content sent to the LLM
 - **Purple** `[LLM] Ada's response` — raw LLM output
 - **Green** `[Ada] move_to(12, 8)` — each directive as it executes
+- **Orange** `[Conversation]` — conversation validation warnings and lifecycle events
 
 ## Memory
 

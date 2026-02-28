@@ -29,8 +29,23 @@ Each NPC gets a budget of **3 commands per turn**. Each command runs to completi
 
 - `move_to(x,y)` — walks the full path tile-by-tile to the target
 - `wait()` — pauses for 300ms
+- `start_conversation_with(Name, message)` — starts a conversation with an adjacent entity (see below)
+- `end_conversation()` — ends the current conversation
 
 If the LLM returns more than 3 commands, the extras are silently dropped.
+
+`start_conversation_with` is special: it **stops the turn immediately** — no further directives in that turn are executed. The turn system pauses while the conversation is active.
+
+## Conversation Pause
+
+When a conversation starts (whether initiated by an NPC directive or by the player pressing **Enter**), the turn loop pauses:
+
+1. `pauseForConversation()` is called on TurnManager
+2. NPC movement is gated — `walkToAsync()` checks a pause gate before each step
+3. The conversation runs to completion (see [conversations.md](conversations.md))
+4. `resumeFromConversation()` resumes the turn loop
+
+The player can start a conversation with an adjacent NPC by pressing **Enter**. This also pauses the turn system.
 
 ## Pause / Resume
 
@@ -52,6 +67,7 @@ A fixed label in the top-left corner shows:
 | File | Role |
 |------|------|
 | `src/game/TurnManager.ts` | Turn loop, directive execution, log integration, pause control |
+| `src/game/ConversationManager.ts` | Conversation lifecycle, validation, NPC/player flows |
 | `src/game/ChronologicalLog.ts` | Per-NPC memory — recording, serialization, summarization |
-| `src/game/entities/NPC.ts` | `walkToAsync()`, `stepTowardAsync()` |
+| `src/game/entities/NPC.ts` | `walkToAsync()`, `stepTowardAsync()`, conversation pause gate |
 | `src/game/entities/Entity.ts` | `moveToAsync()` — single-tile animated move |

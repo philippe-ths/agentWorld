@@ -1,6 +1,6 @@
 # Agent World
 
-A Phaser 3 isometric game where NPCs are driven by an LLM (Anthropic Claude). The player moves freely on a 30x30 tile map while 3 NPCs take turns deciding what to do via Claude. NPCs maintain a chronological log of their observations and actions, giving them memory of past turns.
+A Phaser 3 isometric game where NPCs are driven by an LLM (Anthropic Claude). The player moves freely on a 30×30 tile map while 3 NPCs take turns deciding what to do via Claude. NPCs maintain a chronological log of their observations and actions, giving them memory of past turns. NPCs can hold conversations with each other and with the player.
 
 ## Tech Stack
 
@@ -35,4 +35,6 @@ The dev server must be restarted after changing `.env`.
 | Key | Action |
 |-----|--------|
 | Arrow keys / WASD | Move player one tile |
+| Enter | Talk to an adjacent NPC (opens dialogue box) |
+| Escape | Close dialogue box |
 | P | Pause / resume NPC turn loop |

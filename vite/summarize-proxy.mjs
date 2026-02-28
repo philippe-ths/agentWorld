@@ -8,7 +8,7 @@ const SUMMARIZE_SYSTEM_PROMPT =
     'You are a memory compressor for an NPC in a 2D game. ' +
     'Given a series of chronological log entries, produce a single concise narrative paragraph ' +
     'that preserves key facts, decisions, spatial observations, and interactions. ' +
-    'Drop trivial or redundant details. Write in third person past tense.';
+    'Drop trivial or redundant details. Write in first person past tense.';
 
 // Load .env into process.env
 try {

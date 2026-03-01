@@ -2,7 +2,7 @@ import { Scene } from 'phaser';
 import { Entity, TilePos } from './Entity';
 import { findPath } from '../Pathfinder';
 
-const MAX_REPATH_ATTEMPTS = 3;
+const MAX_REPATH_ATTEMPTS = 5;
 
 export class NPC extends Entity {
     private checkTerrainWalkable: (x: number, y: number) => boolean;
@@ -29,7 +29,21 @@ export class NPC extends Entity {
         let repathCount = 0;
 
         while (this.tilePos.x !== target.x || this.tilePos.y !== target.y) {
-            const path = findPath(this.tilePos, target, this.checkTerrainWalkable);
+            // First attempt: terrain-only (optimistic — entities may move).
+            // Re-paths: entity-aware so the NPC routes around the blocker.
+            const isRepath = repathCount > 0;
+            const walkable = isRepath
+                ? (x: number, y: number) => {
+                    // Own tile must pass (we're standing on it)
+                    if (x === this.tilePos.x && y === this.tilePos.y) return true;
+                    // Goal tile: terrain-only (entity there may move before we arrive)
+                    if (x === target.x && y === target.y) return this.checkTerrainWalkable(x, y);
+                    // Everything else: full entity-aware check
+                    return this.checkWalkable(x, y);
+                }
+                : this.checkTerrainWalkable;
+
+            const path = findPath(this.tilePos, target, walkable);
 
             if (!path || path.length === 0) {
                 console.warn(`%c[${this.name}] No path to (${target.x}, ${target.y})`, 'color: #ffaa00');
@@ -54,6 +68,8 @@ export class NPC extends Entity {
                         return;
                     }
                     break;
+                } else {
+                    repathCount = 0;
                 }
             }
         }

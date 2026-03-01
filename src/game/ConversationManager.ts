@@ -4,6 +4,8 @@ import { Player } from './entities/Player';
 import { EntityManager } from './entities/EntityManager';
 import { LLMService, ConversationMessage, ConversationResponse } from './LLMService';
 import { ChronologicalLog, LOG_CHAR_BUDGET } from './ChronologicalLog';
+import { GoalManager } from './GoalManager';
+import { extractGoal } from './GoalExtractor';
 import { buildWorldState } from './WorldState';
 
 const MAX_EXCHANGES = 6;
@@ -27,6 +29,7 @@ export class ConversationManager {
     private entityManager: EntityManager;
     private llm: LLMService;
     private logs: Map<string, ChronologicalLog>;
+    private goals: Map<string, GoalManager>;
     private callbacks: ConversationCallbacks;
     private activeSession: ConversationSession | null = null;
 
@@ -38,11 +41,13 @@ export class ConversationManager {
         entityManager: EntityManager,
         llm: LLMService,
         logs: Map<string, ChronologicalLog>,
+        goals: Map<string, GoalManager>,
         callbacks: ConversationCallbacks,
     ) {
         this.entityManager = entityManager;
         this.llm = llm;
         this.logs = logs;
+        this.goals = goals;
         this.callbacks = callbacks;
     }
 
@@ -104,7 +109,7 @@ export class ConversationManager {
             await this.callbacks.showSpeechBubble(target, targetResponse.message, 3000);
             exchangeCount++;
         } else {
-            this.finishConversation(target.name);
+            await this.finishConversation(target.name);
             return;
         }
 
@@ -122,7 +127,7 @@ export class ConversationManager {
                 await this.callbacks.showSpeechBubble(initiator, initiatorResponse.message, 3000);
                 exchangeCount++;
             } else {
-                this.finishConversation(initiator.name);
+                await this.finishConversation(initiator.name);
                 return;
             }
 
@@ -138,13 +143,13 @@ export class ConversationManager {
                 await this.callbacks.showSpeechBubble(target, targetResponse2.message, 3000);
                 exchangeCount++;
             } else {
-                this.finishConversation(target.name);
+                await this.finishConversation(target.name);
                 return;
             }
         }
 
         // Hit exchange cap
-        this.finishConversation('exchange limit');
+        await this.finishConversation('exchange limit');
     }
 
     // ── NPC-to-Player Conversation ──────────────────────────
@@ -194,7 +199,7 @@ export class ConversationManager {
             }
         }
 
-        this.finishConversation('Player', true);
+        await this.finishConversation('Player', true);
     }
 
     // ── Player-to-NPC Conversation ──────────────────────────
@@ -245,7 +250,7 @@ export class ConversationManager {
         }
 
         // Save transcript to NPC's log only
-        this.finishConversation('Player', true);
+        await this.finishConversation('Player', true);
     }
 
     /** Called by the dialogue UI when the player submits a message. */
@@ -281,7 +286,7 @@ export class ConversationManager {
         return this.llm.converse(npc.name, worldState, memory, this.activeSession!.history);
     }
 
-    private finishConversation(endedBy: string, playerInvolved = false): void {
+    private async finishConversation(endedBy: string, playerInvolved = false): Promise<void> {
         if (!this.activeSession) return;
 
         const session = this.activeSession;
@@ -294,6 +299,8 @@ export class ConversationManager {
             endedBy,
         };
 
+        const entities = this.entityManager.getEntities();
+
         if (playerInvolved) {
             // Player involved: save to the NPC's log only (Player has no log)
             const npcName = session.initiator instanceof Player
@@ -303,8 +310,15 @@ export class ConversationManager {
             if (npcLog) {
                 npcLog.recordConversation({ ...transcript, partnerName: 'Player' });
             }
+            // Extract goal for the NPC participant
+            const npcEntity = session.initiator instanceof Player ? session.target : session.initiator;
+            const goalMgr = this.goals.get(npcName);
+            if (goalMgr) {
+                const worldState = buildWorldState(npcEntity, entities);
+                await extractGoal(npcName, session.history, worldState, goalMgr);
+            }
         } else {
-            // NPC-to-NPC: save to both logs
+            // NPC-to-NPC: save to both logs and extract goals for both
             const initiatorLog = this.logs.get(session.initiator.name);
             const targetLog = this.logs.get(session.target.name);
             if (initiatorLog) {
@@ -312,6 +326,17 @@ export class ConversationManager {
             }
             if (targetLog) {
                 targetLog.recordConversation({ ...transcript, partnerName: session.initiator.name });
+            }
+
+            const initiatorGoals = this.goals.get(session.initiator.name);
+            const targetGoals = this.goals.get(session.target.name);
+            if (initiatorGoals) {
+                const ws = buildWorldState(session.initiator, entities);
+                await extractGoal(session.initiator.name, session.history, ws, initiatorGoals);
+            }
+            if (targetGoals) {
+                const ws = buildWorldState(session.target, entities);
+                await extractGoal(session.target.name, session.history, ws, targetGoals);
             }
         }
 

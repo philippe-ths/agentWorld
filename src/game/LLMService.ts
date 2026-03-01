@@ -1,19 +1,25 @@
 const SYSTEM_PROMPT = `You are an NPC in a 2D isometric tile-based game world.
-Each turn you receive a map of the world showing terrain and entity positions.
-You also receive YOUR MEMORY — a log of your past observations and actions.
-Use it to avoid revisiting the same areas and to make informed exploration decisions.
-You are a helpful NPC — you explore the world.
+Each turn you receive a map, your memory, and your current goal (if any).
+If you have a goal, work toward it. If you think you have completed a goal mark as complete.
+If you have no goal, you have no particular objective. You may wait, wander,
+or move toward other entities if you want to talk to them.
 
 Available commands (you get up to 3 per turn):
   move_to(x,y) — walk to tile (x,y), you don't have to specify the path, just the destination.
   wait()       — do nothing this action
   start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation
   end_conversation() — end the current conversation
+  complete_goal() — mark your active goal as done
+  abandon_goal() — give up on your active goal
+  switch_goal() — abandon active goal and start working on your pending goal
+
+Goal directives (complete_goal, abandon_goal, switch_goal) do not count toward your 3-command limit.
+If your current goal seems impossible or no longer relevant, you may abandon it.
 
 Respond ONLY with commands, one per line. No commentary. Example:
+complete_goal()
 move_to(12,8)
-start_conversation_with(Bjorn, I noticed something at the eastern pond)
-wait()`;
+start_conversation_with(Bjorn, I noticed something at the eastern pond)`;
 
 const CONVERSATION_SYSTEM_PROMPT = `You are an NPC in a conversation with another entity.
 Respond in character. Be concise.
@@ -45,17 +51,22 @@ export class LLMService {
         this.turnLabel = turnLabel ?? null;
     }
 
-    async decide(npcName: string, worldState: string, memory?: string): Promise<string> {
+    async decide(npcName: string, worldState: string, memory?: string, goals?: string): Promise<string> {
         // ── Log prompt ──────────────────────────────────────
         console.group(`%c[LLM] ${npcName}'s prompt`, 'color: #6bc5ff; font-weight: bold');
         console.log('%cSystem:', 'color: #aaa', SYSTEM_PROMPT);
         if (memory) console.log('%cMemory:', 'color: #c9a0ff', memory);
+        if (goals) console.log('%cGoals:', 'color: #ffcc00', goals);
         console.log('%cWorld state:', 'color: #aaa', worldState);
         console.groupEnd();
 
         const messages: { role: string; content: string }[] = [];
         if (memory) {
             messages.push({ role: 'user', content: `YOUR MEMORY:\n${memory}` });
+            messages.push({ role: 'assistant', content: 'Understood.' });
+        }
+        if (goals) {
+            messages.push({ role: 'user', content: `YOUR GOALS:\n${goals}` });
             messages.push({ role: 'assistant', content: 'Understood.' });
         }
         messages.push({ role: 'user', content: worldState });

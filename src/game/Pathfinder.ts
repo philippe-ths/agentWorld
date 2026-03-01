@@ -11,7 +11,8 @@ export function findPath(
     isWalkable: (x: number, y: number) => boolean,
 ): TilePos[] | null {
     if (start.x === goal.x && start.y === goal.y) return [];
-    if (!isWalkable(goal.x, goal.y)) return null;
+
+    const goalBlocked = !isWalkable(goal.x, goal.y);
 
     const key = (x: number, y: number) => `${x},${y}`;
     const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -28,6 +29,11 @@ export function findPath(
 
     const closed = new Set<string>();
 
+    // Track the closest reachable tile to the goal (for fallback when goal is blocked)
+    let bestKey = startKey;
+    let bestH = h(start.x, start.y);
+    let bestG = 0;
+
     while (open.length > 0) {
         // Find the entry with the lowest f score
         let bestIdx = 0;
@@ -41,6 +47,14 @@ export function findPath(
         const ck = key(cx, cy);
         if (closed.has(ck)) continue;
         closed.add(ck);
+
+        // Update closest reachable tile (prefer closer to goal, break ties by fewer steps)
+        const ch = h(cx, cy);
+        if (ch < bestH || (ch === bestH && g < bestG)) {
+            bestKey = ck;
+            bestH = ch;
+            bestG = g;
+        }
 
         if (cx === goal.x && cy === goal.y) {
             // Reconstruct path
@@ -70,6 +84,19 @@ export function findPath(
             cameFrom.set(nk, ck);
             open.push([ng + h(nx, ny), ng, nx, ny]);
         }
+    }
+
+    // Goal unreachable — if goal was blocked, fall back to closest reachable tile
+    if (goalBlocked && bestKey !== startKey) {
+        const path: TilePos[] = [];
+        let cur = bestKey;
+        while (cur !== startKey) {
+            const [px, py] = cur.split(',').map(Number);
+            path.push({ x: px, y: py });
+            cur = cameFrom.get(cur)!;
+        }
+        path.reverse();
+        return path;
     }
 
     return null;

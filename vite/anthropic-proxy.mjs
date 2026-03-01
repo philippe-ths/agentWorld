@@ -53,18 +53,21 @@ export function anthropicProxy() {
                     return;
                 }
 
-                const { system, messages } = parsed;
+                const { system, messages, max_tokens } = parsed;
                 if (!system || !messages) {
                     res.statusCode = 400;
                     res.end(JSON.stringify({ error: 'Missing system or messages' }));
                     return;
                 }
 
+                // Allow callers to override max_tokens (capped at 512, default 256)
+                const tokens = Math.min(Number(max_tokens) || 256, 512);
+
                 try {
                     const client = new Anthropic({ apiKey });
                     const response = await client.messages.create({
                         model: 'claude-sonnet-4-20250514',
-                        max_tokens: 256,
+                        max_tokens: tokens,
                         system,
                         messages,
                     });

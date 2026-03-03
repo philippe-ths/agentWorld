@@ -4,6 +4,11 @@ import { findPath } from '../Pathfinder';
 
 const MAX_REPATH_ATTEMPTS = 5;
 
+export interface WalkResult {
+    reached: boolean;
+    reason?: 'no_path' | 'repath_limit';
+}
+
 export class NPC extends Entity {
     private checkTerrainWalkable: (x: number, y: number) => boolean;
 
@@ -25,7 +30,7 @@ export class NPC extends Entity {
     }
 
     /** Walk the full path to a target tile using A* pathfinding. Re-paths if blocked by an entity. */
-    async walkToAsync(target: TilePos): Promise<void> {
+    async walkToAsync(target: TilePos): Promise<WalkResult> {
         let repathCount = 0;
 
         while (this.tilePos.x !== target.x || this.tilePos.y !== target.y) {
@@ -47,11 +52,11 @@ export class NPC extends Entity {
 
             if (!path || path.length === 0) {
                 console.warn(`%c[${this.name}] No path to (${target.x}, ${target.y})`, 'color: #ffaa00');
-                return;
+                return { reached: false, reason: 'no_path' };
             }
 
             for (const step of path) {
-                if (this.tilePos.x === target.x && this.tilePos.y === target.y) return;
+                if (this.tilePos.x === target.x && this.tilePos.y === target.y) return { reached: true };
 
                 // Check for conversation pause between steps
                 if (this.conversationPauseGate) await this.conversationPauseGate();
@@ -65,7 +70,7 @@ export class NPC extends Entity {
                     repathCount++;
                     if (repathCount > MAX_REPATH_ATTEMPTS) {
                         console.warn(`%c[${this.name}] Re-path limit reached heading to (${target.x}, ${target.y})`, 'color: #ffaa00');
-                        return;
+                        return { reached: false, reason: 'repath_limit' };
                     }
                     break;
                 } else {
@@ -73,6 +78,7 @@ export class NPC extends Entity {
                 }
             }
         }
+        return { reached: true };
     }
 
     update(_time: number, _delta: number) {

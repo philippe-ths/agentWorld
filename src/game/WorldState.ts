@@ -38,8 +38,5 @@ export function buildWorldState(observer: Entity, allEntities: Entity[]): string
     }
     lines.push('. = grass (walkable), ~ = water (blocked), @ = you, P = player (blocked), A/B/C = NPCs (blocked)');
 
-    lines.push('');
-    lines.push('ACTIONS: move_to(x,y) | wait() | start_conversation_with(Name, message) | end_conversation()');
-
     return lines.join('\n');
 }

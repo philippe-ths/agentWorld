@@ -1,11 +1,12 @@
-import { NPC } from './entities/NPC';
+import { NPC, WalkResult } from './entities/NPC';
 import { Player } from './entities/Player';
 import { Entity } from './entities/Entity';
 import { LLMService } from './LLMService';
 import { parseDirectives, Directive } from './DirectiveParser';
 import { buildWorldState } from './WorldState';
 import { EntityManager } from './entities/EntityManager';
-import { ChronologicalLog, SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET } from './ChronologicalLog';
+import { ChronologicalLog } from './ChronologicalLog';
+import { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET } from './prompts';
 import { GoalManager } from './GoalManager';
 import { ConversationManager } from './ConversationManager';
 
@@ -204,11 +205,18 @@ export class TurnManager {
 
     private async executeDirective(npc: NPC, dir: Directive, log: ChronologicalLog): Promise<boolean> {
         switch (dir.type) {
-            case 'move_to':
+            case 'move_to': {
                 console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
-                await npc.walkToAsync({ x: dir.x, y: dir.y });
-                log.recordAction(`I moved to (${npc.tilePos.x},${npc.tilePos.y})`);
+                const result: WalkResult = await npc.walkToAsync({ x: dir.x, y: dir.y });
+                if (result.reached) {
+                    log.recordAction(`I moved to (${npc.tilePos.x},${npc.tilePos.y})`);
+                } else if (result.reason === 'no_path') {
+                    log.recordAction(`I couldn't find a path to (${dir.x},${dir.y}), I stayed at (${npc.tilePos.x},${npc.tilePos.y})`);
+                } else {
+                    log.recordAction(`I tried to reach (${dir.x},${dir.y}) but the path was blocked, I ended up at (${npc.tilePos.x},${npc.tilePos.y})`);
+                }
                 return false;
+            }
             case 'wait':
                 console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
                 await this.delay(300);

@@ -3,12 +3,11 @@ import { NPC } from './entities/NPC';
 import { Player } from './entities/Player';
 import { EntityManager } from './entities/EntityManager';
 import { LLMService, ConversationMessage, ConversationResponse } from './LLMService';
-import { ChronologicalLog, LOG_CHAR_BUDGET } from './ChronologicalLog';
+import { ChronologicalLog } from './ChronologicalLog';
 import { GoalManager } from './GoalManager';
 import { extractGoal } from './GoalExtractor';
 import { buildWorldState } from './WorldState';
-
-const MAX_EXCHANGES = 6;
+import { LOG_CHAR_BUDGET, MAX_EXCHANGES } from './prompts';
 
 export interface ConversationSession {
     initiator: Entity;

@@ -3,7 +3,7 @@ export interface Goal {
     goal: string;
     status: 'active' | 'pending';
     plan: string;
-    tasks: string;
+    success: string;
 }
 
 function serializeGoal(g: Goal, header: string): string {
@@ -13,7 +13,7 @@ function serializeGoal(g: Goal, header: string): string {
         `Goal: ${g.goal}`,
         `Status: ${g.status}`,
         `Plan: ${g.plan}`,
-        `Tasks: ${g.tasks}`,
+        `Success: ${g.success}`,
     ].join('\n');
 }
 
@@ -21,9 +21,9 @@ function parseGoalSection(text: string, status: 'active' | 'pending'): Goal | nu
     const source = text.match(/^Source:\s*(.+)$/m)?.[1]?.trim();
     const goal = text.match(/^Goal:\s*(.+)$/m)?.[1]?.trim();
     const plan = text.match(/^Plan:\s*(.+)$/m)?.[1]?.trim();
-    const tasks = text.match(/^Tasks:\s*(.+)$/m)?.[1]?.trim();
-    if (!source || !goal || !plan || !tasks) return null;
-    return { source, goal, status, plan, tasks };
+    const success = text.match(/^Success:\s*(.+)$/m)?.[1]?.trim();
+    if (!source || !goal || !plan || !success) return null;
+    return { source, goal, status, plan, success };
 }
 
 export class GoalManager {

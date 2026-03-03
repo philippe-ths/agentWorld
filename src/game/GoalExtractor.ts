@@ -1,33 +1,6 @@
 import { ConversationMessage } from './LLMService';
 import { Goal, GoalManager } from './GoalManager';
-
-function buildExtractionSystemPrompt(npcName: string): string {
-    return `You are analyzing a conversation transcript for an NPC called ${npcName}.
-Does this conversation contain a NEW request, task, objective, or intention
-that ${npcName} should pursue?
-
-This includes:
-- Direct requests from the other party ("go check the pond")
-- Agreements the NPC made ("I'll head north and meet you there")
-- Self-initiated intentions ("I want to find out what's over there")
-
-IMPORTANT: If ${npcName} already has an active or pending goal that matches
-what the conversation suggests, respond with none(). Do not re-extract a goal
-that is already being tracked.
-
-If yes, respond with the goal in this exact format:
-  ## Active Goal
-  Source: (who or what prompted this goal, in one sentence)
-  Goal: (the objective in one sentence)
-  Status: active
-  Plan: (how to achieve the goal, given the available commands: move_to, wait, start_conversation_with)
-  Tasks: (concrete steps, comma-separated)
-
-If no, respond with:
-  none()
-
-Respond with exactly one goal or none(). No commentary.`;
-}
+import { GOAL_EXTRACTION } from './prompts';
 
 function formatTranscript(history: ConversationMessage[]): string {
     return history.map(m => `${m.speaker}: ${m.text}`).join('\n');
@@ -41,12 +14,12 @@ function parseGoalFromResponse(text: string): Goal | null {
     const source = text.match(/^Source:\s*(.+)$/m)?.[1]?.trim();
     const goal = text.match(/^Goal:\s*(.+)$/m)?.[1]?.trim();
     const plan = text.match(/^Plan:\s*(.+)$/m)?.[1]?.trim();
-    const tasks = text.match(/^Tasks:\s*(.+)$/m)?.[1]?.trim();
-    if (!source || !goal || !plan || !tasks) {
+    const success = text.match(/^Success:\s*(.+)$/m)?.[1]?.trim();
+    if (!source || !goal || !plan || !success) {
         console.warn('%c[GoalExtractor] Could not parse goal from LLM response', 'color: #ffaa00', text);
         return null;
     }
-    return { source, goal, status: 'active', plan, tasks };
+    return { source, goal, status: 'active', plan, success };
 }
 
 export async function extractGoal(
@@ -55,7 +28,7 @@ export async function extractGoal(
     worldState: string,
     goalManager: GoalManager,
 ): Promise<void> {
-    const system = buildExtractionSystemPrompt(npcName);
+    const system = GOAL_EXTRACTION.buildSystem(npcName);
     const currentGoals = goalManager.buildPromptContent();
     const transcript = formatTranscript(history);
 
@@ -71,7 +44,7 @@ export async function extractGoal(
         response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system, messages, max_tokens: 128 }),
+            body: JSON.stringify({ model: GOAL_EXTRACTION.model, system, messages, max_tokens: GOAL_EXTRACTION.maxTokens }),
         });
     } catch (err) {
         console.error(`%c[GoalExtractor] Network error for ${npcName}`, 'color: #ff4444', err);

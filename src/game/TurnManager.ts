@@ -85,6 +85,8 @@ export class TurnManager {
     /** Remove an NPC from sleep so they get an LLM call next turn. */
     wakeNpc(name: string): void {
         if (this.sleepUntil.delete(name)) {
+            const npc = this.npcs.find(n => n.name === name);
+            npc?.setSleeping(false);
             console.log(`%c[TurnManager] ${name} woke up (conversation)`, 'color: #6bff6b; font-weight: bold');
         }
     }
@@ -129,6 +131,7 @@ export class TurnManager {
         if (wakeAt !== undefined) {
             // Just woke up naturally
             this.sleepUntil.delete(npc.name);
+            npc.setSleeping(false);
             const log = this.logs.get(npc.name)!;
             log.recordAction(`I woke up (turn ${this.turnNumber})`);
             console.log(`%c[${npc.name}] woke up (sleep expired)`, 'color: #6bff6b; font-weight: bold');
@@ -188,6 +191,7 @@ export class TurnManager {
         // Check if NPC chose to sleep
         if (actionDirectives.some(d => d.type === 'sleep')) {
             this.sleepUntil.set(npc.name, this.turnNumber + SLEEP_TURNS);
+            npc.setSleeping(true);
             log.recordAction(`Entered sleep mode (will wake at turn ${this.turnNumber + SLEEP_TURNS})`);
             console.log(`%c[${npc.name}] sleep() — waking at turn ${this.turnNumber + SLEEP_TURNS}`, 'color: #aaa; font-weight: bold');
         }

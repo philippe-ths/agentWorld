@@ -18,6 +18,8 @@ export abstract class Entity {
     protected map: Phaser.Tilemaps.Tilemap;
     protected checkWalkable: (x: number, y: number) => boolean;
     private nameLabel!: Phaser.GameObjects.Text;
+    private sleeping = false;
+    private zzzLabel: Phaser.GameObjects.Text | null = null;
 
     constructor(
         scene: Scene,
@@ -71,14 +73,6 @@ export abstract class Entity {
         return true;
     }
 
-    updateLabel() {
-        this.nameLabel.setPosition(
-            this.sprite.x,
-            this.sprite.y - this.sprite.height * this.sprite.originY - 2,
-        );
-        this.nameLabel.setDepth(this.sprite.depth + 0.5);
-    }
-
     /** Returns a promise that resolves when the move tween finishes. */
     moveToAsync(dx: number, dy: number): Promise<boolean> {
         return new Promise(resolve => {
@@ -124,10 +118,51 @@ export abstract class Entity {
         return (dx + dy) === 1;
     }
 
+    setSleeping(asleep: boolean): void {
+        if (asleep === this.sleeping) return;
+        this.sleeping = asleep;
+
+        if (asleep) {
+            this.sprite.play('idle-down', true);
+            this.sprite.setAngle(90);
+            this.sprite.setAlpha(0.7);
+
+            this.zzzLabel = this.scene.add.text(0, 0, 'zzZ',
+                FONT.label as Phaser.Types.GameObjects.Text.TextStyle,
+            );
+            this.zzzLabel.setOrigin(0.5, 1);
+            this.zzzLabel.setAlpha(0.8);
+        } else {
+            this.sprite.setAngle(0);
+            this.sprite.setAlpha(1);
+            this.sprite.play('idle-' + this.lastDirection, true);
+
+            this.zzzLabel?.destroy();
+            this.zzzLabel = null;
+        }
+    }
+
+    updateLabel() {
+        this.nameLabel.setPosition(
+            this.sprite.x,
+            this.sprite.y - this.sprite.height * this.sprite.originY - 2,
+        );
+        this.nameLabel.setDepth(this.sprite.depth + 0.5);
+
+        if (this.zzzLabel) {
+            this.zzzLabel.setPosition(
+                this.sprite.x + 12,
+                this.sprite.y - this.sprite.height * this.sprite.originY - 14,
+            );
+            this.zzzLabel.setDepth(this.sprite.depth + 0.5);
+        }
+    }
+
     abstract update(time: number, delta: number): void;
 
     destroy() {
         this.nameLabel.destroy();
+        this.zzzLabel?.destroy();
         this.sprite.destroy();
     }
 }

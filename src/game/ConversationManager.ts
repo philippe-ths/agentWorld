@@ -32,6 +32,9 @@ export class ConversationManager {
     private callbacks: ConversationCallbacks;
     private activeSession: ConversationSession | null = null;
 
+    /** Called when an NPC becomes a conversation target (wakes sleeping NPCs). */
+    onNpcEngaged: ((npcName: string) => void) | null = null;
+
     // Player dialogue state
     private playerInputResolve: ((text: string) => void) | null = null;
     private playerDialogueClosed = false;
@@ -86,6 +89,9 @@ export class ConversationManager {
             turnNumber,
             location: { ...initiator.tilePos },
         };
+
+        // Wake the target NPC if sleeping
+        if (target instanceof NPC) this.onNpcEngaged?.(target.name);
 
         // Opening message from initiator
         this.activeSession.history.push({ speaker: initiator.name, text: openingMessage });
@@ -167,6 +173,9 @@ export class ConversationManager {
             location: { ...initiator.tilePos },
         };
 
+        // Wake the initiating NPC if sleeping (they're being talked to by the player via NPC initiation)
+        this.onNpcEngaged?.(initiator.name);
+
         // NPC's opening message
         this.activeSession.history.push({ speaker: initiator.name, text: openingMessage });
 
@@ -203,6 +212,9 @@ export class ConversationManager {
             turnNumber,
             location: { ...player.tilePos },
         };
+
+        // Wake the target NPC if sleeping
+        this.onNpcEngaged?.(target.name);
 
         this.callbacks.openDialogue(target.name);
 

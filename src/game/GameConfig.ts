@@ -32,6 +32,7 @@ export const SUMMARIZE_EVERY_N_TURNS = 5;
 export const LOG_CHAR_BUDGET = 4000;
 export const MAX_EXCHANGES = 6;
 export const NPC_COMMANDS_PER_TURN = 3;
+export const SLEEP_TURNS = 10;
 
 // ── NPC definitions ──────────────────────────────────────────
 

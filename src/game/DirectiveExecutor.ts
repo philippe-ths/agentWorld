@@ -103,6 +103,9 @@ export class DirectiveExecutor {
                 log.recordAction(`Search result: ${result}`);
                 return true;
             }
+            case 'sleep':
+                // Handled by TurnManager after directive loop
+                return true;
             case 'end_conversation':
                 console.warn(`%c[${npc.name}] end_conversation() used outside conversation`, 'color: #ffaa00');
                 return false;

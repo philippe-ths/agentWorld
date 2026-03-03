@@ -12,7 +12,7 @@ import { ToolRegistry } from './ToolRegistry';
 import { DirectiveExecutor } from './DirectiveExecutor';
 import {
     SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN,
-    NPC_TURN_DELAY, FONT,
+    NPC_TURN_DELAY, FONT, SLEEP_TURNS,
 } from './GameConfig';
 
 type TurnState = 'idle' | 'npc-turn' | 'paused';
@@ -31,6 +31,7 @@ export class TurnManager {
     private goals = new Map<string, GoalManager>();
     private executor: DirectiveExecutor;
     private toolRegistry: ToolRegistry;
+    private sleepUntil = new Map<string, number>();
 
     // Conversation integration
     private conversationPaused = false;
@@ -78,6 +79,14 @@ export class TurnManager {
     setConversationManager(cm: ConversationManager) {
         this.conversationManager = cm;
         this.executor.setConversationManager(cm);
+        cm.onNpcEngaged = (name: string) => this.wakeNpc(name);
+    }
+
+    /** Remove an NPC from sleep so they get an LLM call next turn. */
+    wakeNpc(name: string): void {
+        if (this.sleepUntil.delete(name)) {
+            console.log(`%c[TurnManager] ${name} woke up (conversation)`, 'color: #6bff6b; font-weight: bold');
+        }
     }
 
     /** Called every frame — keeps label positions updated and player moving. */
@@ -109,6 +118,22 @@ export class TurnManager {
     }
 
     private async runNpcTurn(npc: NPC) {
+        // Sleep check — skip LLM call if NPC is sleeping
+        const wakeAt = this.sleepUntil.get(npc.name);
+        if (wakeAt !== undefined && this.turnNumber < wakeAt) {
+            const remaining = wakeAt - this.turnNumber;
+            this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name} sleeping (${remaining} turns left)`);
+            console.log(`%c[${npc.name}] sleeping (${remaining} turns left)`, 'color: #aaa');
+            return;
+        }
+        if (wakeAt !== undefined) {
+            // Just woke up naturally
+            this.sleepUntil.delete(npc.name);
+            const log = this.logs.get(npc.name)!;
+            log.recordAction(`I woke up (turn ${this.turnNumber})`);
+            console.log(`%c[${npc.name}] woke up (sleep expired)`, 'color: #6bff6b; font-weight: bold');
+        }
+
         const log = this.logs.get(npc.name)!;
         const goalManager = this.goals.get(npc.name)!;
         const entities = this.allEntities.getEntities();
@@ -158,6 +183,13 @@ export class TurnManager {
             await this.waitIfConversationPaused();
             const shouldStop = await this.executor.executeAction(npc, dir, log, this.turnNumber);
             if (shouldStop) break;
+        }
+
+        // Check if NPC chose to sleep
+        if (actionDirectives.some(d => d.type === 'sleep')) {
+            this.sleepUntil.set(npc.name, this.turnNumber + SLEEP_TURNS);
+            log.recordAction(`Entered sleep mode (will wake at turn ${this.turnNumber + SLEEP_TURNS})`);
+            console.log(`%c[${npc.name}] sleep() — waking at turn ${this.turnNumber + SLEEP_TURNS}`, 'color: #aaa; font-weight: bold');
         }
 
         // Persist log to disk, then try summarization

@@ -18,12 +18,28 @@ export interface EndConversationDirective {
     type: 'end_conversation';
 }
 
-export type Directive = MoveToDirective | WaitDirective | StartConversationDirective | EndConversationDirective;
+export interface CompleteGoalDirective {
+    type: 'complete_goal';
+}
+
+export interface AbandonGoalDirective {
+    type: 'abandon_goal';
+}
+
+export interface SwitchGoalDirective {
+    type: 'switch_goal';
+}
+
+export type Directive = MoveToDirective | WaitDirective | StartConversationDirective | EndConversationDirective
+    | CompleteGoalDirective | AbandonGoalDirective | SwitchGoalDirective;
 
 const MOVE_TO_RE = /^move_to\(\s*(\d+)\s*,\s*(\d+)\s*\)$/;
 const WAIT_RE = /^wait\(\s*\)$/;
 const START_CONVO_RE = /^start_conversation_with\(\s*([A-Za-z_][A-Za-z0-9_ ]*)\s*,\s*(.+)\s*\)$/;
 const END_CONVO_RE = /^end_conversation\(\s*\)$/;
+const COMPLETE_GOAL_RE = /^complete_goal\(\s*\)$/;
+const ABANDON_GOAL_RE = /^abandon_goal\(\s*\)$/;
+const SWITCH_GOAL_RE = /^switch_goal\(\s*\)$/;
 
 export function parseDirectives(text: string): Directive[] {
     const directives: Directive[] = [];
@@ -42,6 +58,12 @@ export function parseDirectives(text: string): Directive[] {
             directives.push({ type: 'start_conversation_with', targetName: match[1].trim(), message: match[2].trim() });
         } else if (END_CONVO_RE.test(line)) {
             directives.push({ type: 'end_conversation' });
+        } else if (COMPLETE_GOAL_RE.test(line)) {
+            directives.push({ type: 'complete_goal' });
+        } else if (ABANDON_GOAL_RE.test(line)) {
+            directives.push({ type: 'abandon_goal' });
+        } else if (SWITCH_GOAL_RE.test(line)) {
+            directives.push({ type: 'switch_goal' });
         } else {
             console.warn(`%c[DirectiveParser] Unknown directive: "${line}"`, 'color: #ffaa00; font-weight: bold');
         }

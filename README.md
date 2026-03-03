@@ -7,6 +7,7 @@ An isometric game where autonomous NPCs explore, make decisions, and hold conver
 - **LLM-driven NPCs** — Each NPC sends a compact world state and memory to Claude, receives back commands, and executes them autonomously
 - **Persistent memory** — NPCs maintain chronological logs of observations and actions, with automatic summarization of older entries
 - **Conversations** — NPCs can talk to each other (speech bubbles) or to the player (interactive dialogue box). Conversations run outside the turn system and exchange meaningful information via LLM calls
+- **Goals** — NPCs extract goals from conversations and pursue them autonomously, with active/pending goal tracking and lifecycle management
 - **Procedural map** — 30×30 isometric tile map with seeded terrain generation (grass + water ponds)
 - **Turn system** — Sequential NPC turns with pause/resume control
 
@@ -15,7 +16,7 @@ An isometric game where autonomous NPCs explore, make decisions, and hold conver
 - **Phaser 3** — game engine (isometric rendering, sprites, tweens)
 - **TypeScript** — language
 - **Vite** — bundler / dev server (with custom proxy plugins for the Anthropic API)
-- **Anthropic Claude** — NPC decision-making and conversations
+- **Anthropic Claude** — NPC decision-making, conversations, memory summarization, goal extraction
 
 ## Setup
 
@@ -49,7 +50,7 @@ The dev server must be restarted after changing `.env`.
 
 ## How It Works
 
-Each game tick, NPCs take sequential turns. On its turn, an NPC receives a text-based snapshot of the world (a character grid with entity positions) plus its memory log. Claude responds with commands like `move_to(x,y)`, `wait()`, or `start_conversation_with(Name, message)`. Commands execute with animated movement and speech bubbles.
+Each game tick, NPCs take sequential turns. On its turn, an NPC receives a text-based snapshot of the world (a character grid with entity positions) plus its memory log and current goals. Claude responds with commands like `move_to(x,y)`, `wait()`, or `start_conversation_with(Name, message)`. Commands execute with animated movement and speech bubbles.
 
 The player is not part of the turn system and moves freely. Press **Enter** next to an NPC to open a dialogue box and chat directly — the NPC responds via Claude using its memory and world awareness.
 

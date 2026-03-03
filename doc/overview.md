@@ -1,13 +1,13 @@
 # Agent World
 
-A Phaser 3 isometric game where NPCs are driven by an LLM (Anthropic Claude). The player moves freely on a 30×30 tile map while 3 NPCs take turns deciding what to do via Claude. NPCs maintain a chronological log of their observations and actions, giving them memory of past turns. NPCs can hold conversations with each other and with the player.
+A Phaser 3 isometric game where NPCs are driven by an LLM (Anthropic Claude). The player moves freely on a 30x30 tile map while 3 NPCs take turns deciding what to do via Claude. NPCs maintain chronological logs of observations, actions, and conversations, giving them persistent memory. They can converse with each other and the player, and extract goals from conversations to pursue autonomously.
 
 ## Tech Stack
 
 - **Phaser 3** — game engine
 - **TypeScript** — language
 - **Vite** — bundler / dev server
-- **Anthropic Claude** (claude-sonnet-4-20250514) — NPC decision-making
+- **Anthropic Claude** (claude-sonnet-4-20250514) — NPC decision-making, conversations, memory summarization, goal extraction
 
 ## Setup
 
@@ -35,6 +35,4 @@ The dev server must be restarted after changing `.env`.
 | Key | Action |
 |-----|--------|
 | Arrow keys / WASD | Move player one tile |
-| Enter | Talk to an adjacent NPC (opens dialogue box) |
-| Escape | Close dialogue box |
 | P | Pause / resume NPC turn loop |

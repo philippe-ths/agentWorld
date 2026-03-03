@@ -1,30 +1,4 @@
-const SYSTEM_PROMPT = `You are an NPC in a 2D isometric tile-based game world.
-Each turn you receive a map of the world showing terrain and entity positions.
-You also receive YOUR MEMORY — a log of your past observations and actions.
-Use it to avoid revisiting the same areas and to make informed exploration decisions.
-You are a helpful NPC — you explore the world.
-
-Available commands (you get up to 3 per turn):
-  move_to(x,y) — walk to tile (x,y), you don't have to specify the path, just the destination.
-  wait()       — do nothing this action
-  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation
-  end_conversation() — end the current conversation
-
-Respond ONLY with commands, one per line. No commentary. Example:
-move_to(12,8)
-start_conversation_with(Bjorn, I noticed something at the eastern pond)
-wait()`;
-
-const CONVERSATION_SYSTEM_PROMPT = `You are an NPC in a conversation with another entity.
-Respond in character. Be concise.
-The purpose of conversation is to exchange useful information. 
-Do not make idle small talk. If you have nothing important to say, end the conversation.
-Keep your responses to 1-2 sentences.
-Do not communicate positions or map features.
-
-Respond with ONE of:
-  say(your message here)
-  end_conversation()`;
+import { DECISION, CONVERSATION } from './prompts';
 
 export interface ConversationMessage {
     speaker: string;
@@ -45,11 +19,12 @@ export class LLMService {
         this.turnLabel = turnLabel ?? null;
     }
 
-    async decide(npcName: string, worldState: string, memory?: string): Promise<string> {
+    async decide(npcName: string, worldState: string, memory?: string, goals?: string): Promise<string> {
         // ── Log prompt ──────────────────────────────────────
         console.group(`%c[LLM] ${npcName}'s prompt`, 'color: #6bc5ff; font-weight: bold');
-        console.log('%cSystem:', 'color: #aaa', SYSTEM_PROMPT);
+        console.log('%cSystem:', 'color: #aaa', DECISION.buildSystem());
         if (memory) console.log('%cMemory:', 'color: #c9a0ff', memory);
+        if (goals) console.log('%cGoals:', 'color: #ffcc00', goals);
         console.log('%cWorld state:', 'color: #aaa', worldState);
         console.groupEnd();
 
@@ -58,11 +33,17 @@ export class LLMService {
             messages.push({ role: 'user', content: `YOUR MEMORY:\n${memory}` });
             messages.push({ role: 'assistant', content: 'Understood.' });
         }
+        if (goals) {
+            messages.push({ role: 'user', content: `YOUR GOALS:\n${goals}` });
+            messages.push({ role: 'assistant', content: 'Understood.' });
+        }
         messages.push({ role: 'user', content: worldState });
 
         const body = {
-            system: SYSTEM_PROMPT,
+            model: DECISION.model,
+            system: DECISION.buildSystem(),
             messages,
+            max_tokens: DECISION.maxTokens,
         };
 
         let response: Response;
@@ -118,8 +99,10 @@ export class LLMService {
         messages.push({ role: 'user', content: `CONVERSATION:\n${historyText}\n\nRespond with say(message) or end_conversation().` });
 
         const body = {
-            system: CONVERSATION_SYSTEM_PROMPT,
+            model: CONVERSATION.model,
+            system: CONVERSATION.buildSystem(),
             messages,
+            max_tokens: CONVERSATION.maxTokens,
         };
 
         console.group(`%c[LLM] ${npcName}'s conversation response`, 'color: #ff9f43; font-weight: bold');
@@ -180,5 +163,3 @@ export class LLMService {
         }
     }
 }
-
-export { SYSTEM_PROMPT, CONVERSATION_SYSTEM_PROMPT };

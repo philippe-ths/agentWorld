@@ -50,6 +50,7 @@ export class GameScene extends Scene {
             this.entityManager,
             this.turnManager.getLlm(),
             this.turnManager.getLogs(),
+            this.turnManager.getGoals(),
             {
                 showSpeechBubble: (entity, text, duration) =>
                     showSpeechBubble(this, entity, text, duration),

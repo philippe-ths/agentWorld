@@ -23,6 +23,7 @@ NPC A emits start_conversation_with(B, opening)
   → B responds with say(message) or end_conversation()
   → A receives updated history via LLM
   → ...alternate up to 6 total exchanges...
+  → GoalExtractor analyzes transcript for new goals
   → Turn system resumes
 ```
 
@@ -58,7 +59,7 @@ Player presses Enter next to NPC
   → Turn system resumes
 ```
 
-The NPC receives its world state, memory, and the full conversation history each time it responds. It uses the `CONVERSATION_SYSTEM_PROMPT` — a dedicated prompt that instructs the NPC to be concise, exchange useful information, and end the conversation when it has nothing important to say.
+The NPC receives its world state, memory, and the full conversation history each time it responds. It uses the `CONVERSATION` prompt config from `prompts.ts` — a dedicated prompt that instructs the NPC to be concise, exchange useful information, and end the conversation when it has nothing important to say.
 
 ### Dialogue Box
 
@@ -82,7 +83,7 @@ These are available to NPCs during their normal turn decision:
 
 ### Conversation Prompt Commands
 
-These are available inside the conversation loop (via `CONVERSATION_SYSTEM_PROMPT`):
+These are available inside the conversation loop (via the `CONVERSATION` prompt config):
 
 | Directive | Description |
 |-----------|-------------|
@@ -91,20 +92,7 @@ These are available inside the conversation loop (via `CONVERSATION_SYSTEM_PROMP
 
 ## Conversation System Prompt
 
-During a conversation, NPCs use a separate prompt from the normal decision prompt:
-
-```
-You are an NPC in a conversation with another entity.
-Respond in character. Be concise.
-The purpose of conversation is to exchange useful information.
-Do not make idle small talk. If you have nothing important to say, end the conversation.
-Keep your responses to 1-2 sentences.
-Do not communicate positions or map features.
-
-Respond with ONE of:
-  say(your message here)
-  end_conversation()
-```
+During a conversation, NPCs use the `CONVERSATION` prompt config from `src/game/prompts.ts` (separate from the normal `DECISION` prompt). The prompt instructs the NPC to respond in character, be concise, exchange useful information, and end the conversation when it has nothing important to say.
 
 ## Validation Rules
 
@@ -122,6 +110,12 @@ Validation failures are logged as warnings and the directive is skipped.
 - The turn loop pauses via `pauseForConversation()` and resumes via `resumeFromConversation()` when the conversation finishes
 - NPC movement is gated during conversations — `NPC.walkToAsync()` checks a pause gate before each step
 - The player pressing **Enter** also pauses the turn loop for the duration of the dialogue
+
+## Goal Extraction
+
+After a conversation ends, `GoalExtractor.extractGoal()` runs on the transcript for each NPC participant. The `GOAL_EXTRACTION` prompt config (parameterized with the NPC's name) analyzes the transcript and detects new goals — direct requests, agreements, or self-initiated intentions. Extracted goals are added as active or pending goals via `GoalManager`.
+
+See [architecture.md](architecture.md) for goal format and lifecycle details.
 
 ## Transcript Logging
 
@@ -145,6 +139,8 @@ For NPC-to-NPC conversations, both NPCs get the transcript in their logs. For pl
 | `src/game/ConversationManager.ts` | Core orchestrator — validation, session lifecycle, NPC-NPC / Player-NPC flows |
 | `src/game/ui/SpeechBubble.ts` | NPC speech bubble rendering and timed display |
 | `src/game/ui/DialogueBox.ts` | Player dialogue panel with text input |
-| `src/game/LLMService.ts` | `converse()` method and `CONVERSATION_SYSTEM_PROMPT` |
+| `src/game/LLMService.ts` | `converse()` method for conversation LLM calls |
+| `src/game/prompts.ts` | `CONVERSATION` prompt config (model, tokens, system prompt) |
+| `src/game/GoalExtractor.ts` | Extracts goals from conversation transcripts via LLM |
 | `src/game/DirectiveParser.ts` | Parses `start_conversation_with` and `end_conversation` directives |
 | `src/game/TurnManager.ts` | Conversation pause/resume, player interrupt entry point |

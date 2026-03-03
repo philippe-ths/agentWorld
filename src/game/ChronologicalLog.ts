@@ -1,6 +1,6 @@
-// ── Configuration ───────────────────────────────────────────
-export const SUMMARIZE_EVERY_N_TURNS = 5;
-export const LOG_CHAR_BUDGET = 4000;
+import { SUMMARIZE, SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET } from './prompts';
+
+export { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET };
 
 // ── Data model ──────────────────────────────────────────────
 
@@ -159,17 +159,22 @@ export class ChronologicalLog {
 
         let summary: string;
         try {
-            const res = await fetch('/api/summarize', {
+            const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ entries: entriesText }),
+                body: JSON.stringify({
+                    model: SUMMARIZE.model,
+                    system: SUMMARIZE.buildSystem(),
+                    messages: [{ role: 'user', content: entriesText }],
+                    max_tokens: SUMMARIZE.maxTokens,
+                }),
             });
             if (!res.ok) {
                 console.warn(`[ChronologicalLog] Summarize failed for ${this.npcName}: HTTP ${res.status}`);
                 return;
             }
             const data = await res.json();
-            summary = data.summary;
+            summary = data.text;
         } catch (err) {
             console.warn(`[ChronologicalLog] Summarize error for ${this.npcName}:`, err);
             return;

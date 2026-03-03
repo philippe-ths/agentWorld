@@ -52,6 +52,8 @@ NPCs can initiate conversations with adjacent entities via `start_conversation_w
 
 The player can also initiate conversations via the dialogue box UI (click on an adjacent NPC).
 
+See [conversations.md](conversations.md) for the full conversation lifecycle and UI details.
+
 ## Goals
 
 Each NPC can hold one active goal and one pending goal. Goals are loaded at the start of each turn and saved at the end.

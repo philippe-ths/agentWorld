@@ -141,6 +141,8 @@ Conversations are capped at `MAX_EXCHANGES` (6) rounds. After a conversation end
 
 Conversation transcripts are recorded in the NPC's chronological log for future memory.
 
+See [conversations.md](conversations.md) for the full conversation lifecycle, validation rules, and UI details.
+
 ## Goals
 
 Each NPC can have one **active** goal and one **pending** goal, persisted to `data/logs/goals-{Name}.md`.

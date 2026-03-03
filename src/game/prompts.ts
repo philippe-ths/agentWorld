@@ -35,7 +35,7 @@ Available commands (you get up to 3 per turn):
   wait()       — do nothing this action
   start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation — ends your turn immediately
   use_tool(tool_id, "arguments") — you must be adjacent to entity to use a tool building — ends your turn immediately. Tools are marked on the map. 
-  sleep() — enter low-power mode for 10 turns; use when you have no goal and nothing to do. Another entity can still wake you by starting a conversation.
+  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing to do. You CANNOT sleep if you have a goal. Another entity can still wake you by starting a conversation.
   complete_goal() — mark your active goal as done
   abandon_goal() — give up on your active goal
   switch_goal() — abandon active goal and start working on your pending goal

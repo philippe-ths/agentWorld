@@ -188,12 +188,17 @@ export class TurnManager {
             if (shouldStop) break;
         }
 
-        // Check if NPC chose to sleep
+        // Check if NPC chose to sleep (blocked if they have an active goal)
         if (actionDirectives.some(d => d.type === 'sleep')) {
-            this.sleepUntil.set(npc.name, this.turnNumber + SLEEP_TURNS);
-            npc.setSleeping(true);
-            log.recordAction(`Entered sleep mode (will wake at turn ${this.turnNumber + SLEEP_TURNS})`);
-            console.log(`%c[${npc.name}] sleep() — waking at turn ${this.turnNumber + SLEEP_TURNS}`, 'color: #aaa; font-weight: bold');
+            if (goalManager.getActiveGoal()) {
+                console.log(`%c[${npc.name}] sleep() rejected — has active goal`, 'color: #ffaa00; font-weight: bold');
+                log.recordAction('I tried to sleep but I have an active goal to work on');
+            } else {
+                this.sleepUntil.set(npc.name, this.turnNumber + SLEEP_TURNS);
+                npc.setSleeping(true);
+                log.recordAction(`Entered sleep mode (will wake at turn ${this.turnNumber + SLEEP_TURNS})`);
+                console.log(`%c[${npc.name}] sleep() — waking at turn ${this.turnNumber + SLEEP_TURNS}`, 'color: #aaa; font-weight: bold');
+            }
         }
 
         // Persist log to disk, then try summarization

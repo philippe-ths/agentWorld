@@ -1,7 +1,9 @@
+import { PLAYER_SPAWN, NPCS, BUILDINGS, MAP_SEED, MAP_COLS, MAP_ROWS } from './GameConfig';
+
 export const TILE_WATER = 1;
 
-export const MAP_WIDTH = 30;
-export const MAP_HEIGHT = 30;
+export const MAP_WIDTH = MAP_COLS;
+export const MAP_HEIGHT = MAP_ROWS;
 
 // Seeded PRNG (mulberry32)
 function mulberry32(seed: number) {
@@ -14,7 +16,7 @@ function mulberry32(seed: number) {
     };
 }
 
-function generateMap(width: number, height: number, seed = 42): number[][] {
+function generateMap(width: number, height: number, seed: number): number[][] {
     const rng = mulberry32(seed);
     const map: number[][] = [];
 
@@ -51,11 +53,24 @@ function generateMap(width: number, height: number, seed = 42): number[][] {
 
     // Guarantee spawn areas are grass
     const spawnPoints = [
-        { x: 5, y: 5 },   // Player
-        { x: 15, y: 10 }, // Ada
-        { x: 25, y: 20 }, // Bjorn
-        { x: 10, y: 25 }, // Cora
+        PLAYER_SPAWN,
+        ...NPCS.map(n => n.tile),
     ];
+
+    // Also protect building positions from water
+    const buildingClearPoints = BUILDINGS.map(b => b.tile);
+    for (const bp of buildingClearPoints) {
+        for (let dy = -2; dy <= 2; dy++) {
+            for (let dx = -2; dx <= 2; dx++) {
+                const bx = bp.x + dx;
+                const by = bp.y + dy;
+                if (bx >= 0 && bx < width && by >= 0 && by < height) {
+                    map[by][bx] = 0;
+                }
+            }
+        }
+    }
+
     for (const sp of spawnPoints) {
         for (let dy = -2; dy <= 2; dy++) {
             for (let dx = -2; dx <= 2; dx++) {
@@ -71,4 +86,4 @@ function generateMap(width: number, height: number, seed = 42): number[][] {
     return map;
 }
 
-export const MAP_DATA: number[][] = generateMap(MAP_WIDTH, MAP_HEIGHT);
+export const MAP_DATA: number[][] = generateMap(MAP_WIDTH, MAP_HEIGHT, MAP_SEED);

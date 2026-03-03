@@ -1,7 +1,7 @@
 import { Scene } from 'phaser';
+import { TILE_W, TILE_H, MOVE_TWEEN_DURATION, FONT } from '../GameConfig';
 
-export const TILE_W = 64;
-export const TILE_H = 32;
+export { TILE_W, TILE_H };
 
 export interface TilePos {
     x: number;
@@ -47,13 +47,9 @@ export abstract class Entity {
         this.sprite.play('idle-down');
         this.updateDepth();
 
-        this.nameLabel = this.scene.add.text(0, 0, this.name, {
-            fontSize: '11px',
-            color: '#ffffff',
-            fontFamily: 'Arial, sans-serif',
-            stroke: '#000000',
-            strokeThickness: 3,
-        });
+        this.nameLabel = this.scene.add.text(0, 0, this.name,
+            FONT.label as Phaser.Types.GameObjects.Text.TextStyle,
+        );
         this.nameLabel.setOrigin(0.5, 1);
     }
 
@@ -70,34 +66,8 @@ export abstract class Entity {
 
         if (!this.checkWalkable(targetX, targetY)) return false;
 
-        let direction: string;
-        if (dy < 0) direction = 'up';
-        else if (dy > 0) direction = 'down';
-        else if (dx < 0) direction = 'left';
-        else direction = 'right';
-
-        this.tilePos.x = targetX;
-        this.tilePos.y = targetY;
-        this.lastDirection = direction;
-        this.updateDepth();
-
-        this.sprite.play('walk-' + direction, true);
-
-        const worldPos = this.map.tileToWorldXY(targetX, targetY)!;
-        this.isMoving = true;
-
-        this.scene.tweens.add({
-            targets: this.sprite,
-            x: worldPos.x + TILE_W / 2,
-            y: worldPos.y + TILE_H / 2,
-            duration: 180,
-            ease: 'Power2',
-            onComplete: () => {
-                this.isMoving = false;
-                this.sprite.play('idle-' + this.lastDirection, true);
-            },
-        });
-
+        // Fire-and-forget: start the async move but don't await it
+        this.moveToAsync(dx, dy);
         return true;
     }
 
@@ -137,7 +107,7 @@ export abstract class Entity {
                 targets: this.sprite,
                 x: worldPos.x + TILE_W / 2,
                 y: worldPos.y + TILE_H / 2,
-                duration: 180,
+                duration: MOVE_TWEEN_DURATION,
                 ease: 'Power2',
                 onComplete: () => {
                     this.isMoving = false;

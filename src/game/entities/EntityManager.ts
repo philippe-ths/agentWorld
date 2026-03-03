@@ -1,8 +1,14 @@
 import { Entity } from './Entity';
 import { MAP_DATA, MAP_WIDTH, MAP_HEIGHT, TILE_WATER } from '../MapData';
+import { ToolRegistry } from '../ToolRegistry';
 
 export class EntityManager {
     private entities: Entity[] = [];
+    private toolRegistry: ToolRegistry | null = null;
+
+    setToolRegistry(registry: ToolRegistry): void {
+        this.toolRegistry = registry;
+    }
 
     add(entity: Entity) {
         this.entities.push(entity);
@@ -30,6 +36,7 @@ export class EntityManager {
     isWalkable = (x: number, y: number): boolean => {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
         if (MAP_DATA[y][x] === TILE_WATER) return false;
+        if (this.toolRegistry?.isBuildingAt(x, y)) return false;
         if (this.isTileOccupied(x, y)) return false;
         return true;
     };
@@ -37,6 +44,7 @@ export class EntityManager {
     isTerrainWalkable = (x: number, y: number): boolean => {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
         if (MAP_DATA[y][x] === TILE_WATER) return false;
+        if (this.toolRegistry?.isBuildingAt(x, y)) return false;
         return true;
     };
 }

@@ -7,7 +7,7 @@ import { ChronologicalLog } from './ChronologicalLog';
 import { GoalManager } from './GoalManager';
 import { extractGoal } from './GoalExtractor';
 import { buildWorldState } from './WorldState';
-import { LOG_CHAR_BUDGET, MAX_EXCHANGES } from './prompts';
+import { LOG_CHAR_BUDGET, MAX_EXCHANGES, SPEECH_BUBBLE_DURATION } from './GameConfig';
 
 export interface ConversationSession {
     initiator: Entity;
@@ -96,7 +96,7 @@ export class ConversationManager {
         const targetMemory = this.logs.get(target.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
 
         const [, targetResponse] = await Promise.all([
-            this.callbacks.showSpeechBubble(initiator, openingMessage, 3000),
+            this.callbacks.showSpeechBubble(initiator, openingMessage, SPEECH_BUBBLE_DURATION),
             this.llm.converse(target.name, targetWorldState, targetMemory, this.activeSession.history),
         ]);
 
@@ -105,7 +105,7 @@ export class ConversationManager {
         // Target responds
         if (targetResponse.type === 'say') {
             this.activeSession.history.push({ speaker: target.name, text: targetResponse.message });
-            await this.callbacks.showSpeechBubble(target, targetResponse.message, 3000);
+            await this.callbacks.showSpeechBubble(target, targetResponse.message, SPEECH_BUBBLE_DURATION);
             exchangeCount++;
         } else {
             await this.finishConversation(target.name);
@@ -123,7 +123,7 @@ export class ConversationManager {
 
             if (initiatorResponse.type === 'say') {
                 this.activeSession.history.push({ speaker: initiator.name, text: initiatorResponse.message });
-                await this.callbacks.showSpeechBubble(initiator, initiatorResponse.message, 3000);
+                await this.callbacks.showSpeechBubble(initiator, initiatorResponse.message, SPEECH_BUBBLE_DURATION);
                 exchangeCount++;
             } else {
                 await this.finishConversation(initiator.name);
@@ -139,7 +139,7 @@ export class ConversationManager {
 
             if (targetResponse2.type === 'say') {
                 this.activeSession.history.push({ speaker: target.name, text: targetResponse2.message });
-                await this.callbacks.showSpeechBubble(target, targetResponse2.message, 3000);
+                await this.callbacks.showSpeechBubble(target, targetResponse2.message, SPEECH_BUBBLE_DURATION);
                 exchangeCount++;
             } else {
                 await this.finishConversation(target.name);
@@ -171,33 +171,12 @@ export class ConversationManager {
         this.activeSession.history.push({ speaker: initiator.name, text: openingMessage });
 
         // Show speech bubble for the opening, then open dialogue box
-        await this.callbacks.showSpeechBubble(initiator, openingMessage, 3000);
+        await this.callbacks.showSpeechBubble(initiator, openingMessage, SPEECH_BUBBLE_DURATION);
 
-        this.playerDialogueClosed = false;
         this.callbacks.openDialogue(initiator.name);
         this.callbacks.addDialogueMessage(initiator.name, openingMessage);
 
-        // Wait for player messages until dialogue is closed
-        while (!this.playerDialogueClosed) {
-            const playerText = await this.waitForPlayerInput();
-            if (this.playerDialogueClosed) break;
-
-            this.activeSession.history.push({ speaker: 'Player', text: playerText });
-            this.callbacks.addDialogueMessage('Player', playerText);
-
-            // NPC responds via LLM
-            const npcResponse = await this.sendPlayerMessageToNpc(initiator);
-            if (this.playerDialogueClosed) break;
-
-            if (npcResponse.type === 'say') {
-                this.activeSession.history.push({ speaker: initiator.name, text: npcResponse.message });
-                this.callbacks.addDialogueMessage(initiator.name, npcResponse.message);
-            } else {
-                this.activeSession.history.push({ speaker: initiator.name, text: '[ended conversation]' });
-                this.callbacks.addDialogueMessage(initiator.name, '(has nothing more to say)');
-            }
-        }
-
+        await this.runPlayerConversationLoop(initiator);
         await this.finishConversation('Player', true);
     }
 
@@ -225,31 +204,34 @@ export class ConversationManager {
             location: { ...player.tilePos },
         };
 
-        this.playerDialogueClosed = false;
         this.callbacks.openDialogue(target.name);
 
-        // Wait for player messages until dialogue is closed
+        await this.runPlayerConversationLoop(target);
+        await this.finishConversation('Player', true);
+    }
+
+    /** Shared loop: alternates player input and NPC LLM responses until dialogue closes. */
+    private async runPlayerConversationLoop(npc: NPC): Promise<void> {
+        this.playerDialogueClosed = false;
+
         while (!this.playerDialogueClosed) {
             const playerText = await this.waitForPlayerInput();
             if (this.playerDialogueClosed) break;
 
-            this.activeSession.history.push({ speaker: 'Player', text: playerText });
+            this.activeSession!.history.push({ speaker: 'Player', text: playerText });
             this.callbacks.addDialogueMessage('Player', playerText);
 
-            const npcResponse = await this.sendPlayerMessageToNpc(target);
+            const npcResponse = await this.sendPlayerMessageToNpc(npc);
             if (this.playerDialogueClosed) break;
 
             if (npcResponse.type === 'say') {
-                this.activeSession.history.push({ speaker: target.name, text: npcResponse.message });
-                this.callbacks.addDialogueMessage(target.name, npcResponse.message);
+                this.activeSession!.history.push({ speaker: npc.name, text: npcResponse.message });
+                this.callbacks.addDialogueMessage(npc.name, npcResponse.message);
             } else {
-                this.activeSession.history.push({ speaker: target.name, text: '[ended conversation]' });
-                this.callbacks.addDialogueMessage(target.name, '(has nothing more to say)');
+                this.activeSession!.history.push({ speaker: npc.name, text: '[ended conversation]' });
+                this.callbacks.addDialogueMessage(npc.name, '(has nothing more to say)');
             }
         }
-
-        // Save transcript to NPC's log only
-        await this.finishConversation('Player', true);
     }
 
     /** Called by the dialogue UI when the player submits a message. */

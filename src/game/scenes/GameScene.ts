@@ -9,6 +9,9 @@ import { TurnManager } from '../TurnManager';
 import { ConversationManager } from '../ConversationManager';
 import { showSpeechBubble } from '../ui/SpeechBubble';
 import { DialogueBox } from '../ui/DialogueBox';
+import { ToolRegistry } from '../ToolRegistry';
+import { searchWeb } from '../ToolService';
+import { FONT, NPCS, PLAYER_SPAWN, BUILDINGS } from '../GameConfig';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -21,26 +24,30 @@ export class GameScene extends Scene {
     private conversationManager!: ConversationManager;
     private dialogueBox!: DialogueBox;
     private interactKey!: Phaser.Input.Keyboard.Key;
+    private toolRegistry!: ToolRegistry;
 
     constructor() {
         super('GameScene');
     }
 
     create() {
+        this.toolRegistry = this.createToolRegistry();
         this.createTilemap();
         this.createAnimations();
 
         this.entityManager = new EntityManager();
-        this.player = new Player(this, this.map, { x: 5, y: 5 }, this.entityManager.isWalkable);
+        this.entityManager.setToolRegistry(this.toolRegistry);
+        this.player = new Player(this, this.map, PLAYER_SPAWN, this.entityManager.isWalkable);
         this.entityManager.add(this.player);
 
         this.spawnNPCs();
         this.setupCamera();
+        this.placeBuildingLabels();
 
         // Temporary: log world state so we can inspect the format
-        console.log(buildWorldState(this.player, this.entityManager.getEntities()));
+        console.log(buildWorldState(this.player, this.entityManager.getEntities(), this.toolRegistry));
 
-        this.turnManager = new TurnManager(this, this.npcs, this.entityManager);
+        this.turnManager = new TurnManager(this, this.npcs, this.entityManager, this.toolRegistry);
 
         // Set up dialogue box UI
         this.dialogueBox = new DialogueBox(this);
@@ -164,13 +171,7 @@ export class GameScene extends Scene {
     // ── NPCs ─────────────────────────────────────────────────
 
     private spawnNPCs() {
-        const npcDefs = [
-            { name: 'Ada', tile: { x: 15, y: 10 }, tint: 0xff6b6b },
-            { name: 'Bjorn', tile: { x: 25, y: 20 }, tint: 0x6bc5ff },
-            { name: 'Cora', tile: { x: 10, y: 25 }, tint: 0xb06bff },
-        ];
-
-        for (const def of npcDefs) {
+        for (const def of NPCS) {
             const npc = new NPC(
                 this, this.map, def.tile,
                 this.entityManager.isWalkable,
@@ -179,6 +180,48 @@ export class GameScene extends Scene {
             );
             this.npcs.push(npc);
             this.entityManager.add(npc);
+        }
+    }
+
+    // ── Tool Buildings ───────────────────────────────────────
+
+    private createToolRegistry(): ToolRegistry {
+        const registry = new ToolRegistry();
+
+        // Register tool handlers
+        registry.registerHandler('search', searchWeb);
+
+        // Register buildings from config
+        for (const def of BUILDINGS) {
+            registry.registerFromConfig(def);
+        }
+
+        return registry;
+    }
+
+    private placeBuildingLabels(): void {
+        for (const building of this.toolRegistry.getAll()) {
+            const worldPos = this.map.tileToWorldXY(building.tile.x, building.tile.y)!;
+            const depth = building.tile.x + building.tile.y + 1;
+
+            // 3D house image overlay on the grass tile
+            const house = this.add.image(
+                worldPos.x + TILE_W / 2,
+                worldPos.y + TILE_H,
+                'building-house',
+            );
+            house.setOrigin(0.5, 1);
+            house.setDepth(depth);
+
+            // Name label above the house
+            const label = this.add.text(
+                worldPos.x + TILE_W / 2,
+                worldPos.y + TILE_H - house.height,
+                building.displayName,
+                FONT.label as Phaser.Types.GameObjects.Text.TextStyle,
+            );
+            label.setOrigin(0.5, 1);
+            label.setDepth(depth + 0.5);
         }
     }
 

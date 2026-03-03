@@ -1,3 +1,5 @@
+import { LLM_ENDPOINTS } from './GameConfig';
+
 export interface Goal {
     source: string;
     goal: string;
@@ -38,7 +40,7 @@ export class GoalManager {
     async load(): Promise<void> {
         let content = '';
         try {
-            const res = await fetch(`/api/goals/${this.npcName}`);
+            const res = await fetch(`${LLM_ENDPOINTS.goals}/${this.npcName}`);
             if (res.ok) {
                 const data = await res.json();
                 content = data.content ?? '';
@@ -66,7 +68,7 @@ export class GoalManager {
         if (this.activeGoal) parts.push(serializeGoal(this.activeGoal, 'Active Goal'));
         if (this.pendingGoal) parts.push(serializeGoal(this.pendingGoal, 'Pending Goal'));
 
-        await fetch(`/api/goals/${this.npcName}`, {
+        await fetch(`${LLM_ENDPOINTS.goals}/${this.npcName}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content: parts.join('\n\n') }),

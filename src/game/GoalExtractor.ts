@@ -1,6 +1,7 @@
 import { ConversationMessage } from './LLMService';
 import { Goal, GoalManager } from './GoalManager';
 import { GOAL_EXTRACTION } from './prompts';
+import { LLM_ENDPOINTS } from './GameConfig';
 
 function formatTranscript(history: ConversationMessage[]): string {
     return history.map(m => `${m.speaker}: ${m.text}`).join('\n');
@@ -41,7 +42,7 @@ export async function extractGoal(
 
     let response: Response;
     try {
-        response = await fetch('/api/chat', {
+        response = await fetch(LLM_ENDPOINTS.chat, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: GOAL_EXTRACTION.model, system, messages, max_tokens: GOAL_EXTRACTION.maxTokens }),

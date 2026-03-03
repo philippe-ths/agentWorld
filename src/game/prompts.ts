@@ -1,3 +1,12 @@
+import {
+    LLM_MODEL,
+    SUMMARIZE_EVERY_N_TURNS,
+    LOG_CHAR_BUDGET,
+    MAX_EXCHANGES,
+} from './GameConfig';
+
+export { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, MAX_EXCHANGES };
+
 // ── Types ────────────────────────────────────────────────────
 
 export interface PromptConfig {
@@ -6,12 +15,6 @@ export interface PromptConfig {
     buildSystem: (...args: string[]) => string;
 }
 
-// ── Gameplay tuning ──────────────────────────────────────────
-
-export const SUMMARIZE_EVERY_N_TURNS = 5;
-export const LOG_CHAR_BUDGET = 4000;
-export const MAX_EXCHANGES = 6;
-
 // ── Per-prompt configs ───────────────────────────────────────
 
 /**
@@ -19,7 +22,7 @@ export const MAX_EXCHANGES = 6;
  * Context: memory (chronological log), goals (active/pending), world state (map + all entity positions).
  */
 export const DECISION: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL,
     maxTokens: 256,
     buildSystem: () => `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC. 
 Each turn you receive a map, your memory, and your current goal (if any).
@@ -30,7 +33,8 @@ If you have no goal, you have no particular objective. You may wait.
 Available commands (you get up to 3 per turn):
   move_to(x,y) — walk to tile (x,y), you don't have to specify the path, just the destination. The game will figure out a path.
   wait()       — do nothing this action
-  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation
+  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation — ends your turn immediately
+  use_tool(tool_id, "arguments") — you must be adjacent to entity to use a tool building — ends your turn immediately. Tools are marked on the map. 
   complete_goal() — mark your active goal as done
   abandon_goal() — give up on your active goal
   switch_goal() — abandon active goal and start working on your pending goal
@@ -49,7 +53,7 @@ start_conversation_with(Bjorn, I noticed something at the eastern pond)`,
  * Context: memory (chronological log), world state, conversation history (speaker: text pairs).
  */
 export const CONVERSATION: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL,
     maxTokens: 512,
     buildSystem: () => `You are an NPC in a conversation with another entity.
 Respond in character. 
@@ -70,7 +74,7 @@ Respond with ONE of:
  * Context: chronological log entries eligible for summarization (oldest turns as markdown).
  */
 export const SUMMARIZE: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL,
     maxTokens: 512,
     buildSystem: () =>
         'You are a memory compressor for an NPC in a 2D game. ' +
@@ -84,7 +88,7 @@ export const SUMMARIZE: PromptConfig = {
  * Context: current goals (active/pending), world state, conversation transcript.
  */
 export const GOAL_EXTRACTION: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL,
     maxTokens: 128,
     buildSystem: (npcName: string) => `You are analyzing a conversation transcript for an NPC called ${npcName}.
 Does this conversation contain a NEW request, task, objective, or intention

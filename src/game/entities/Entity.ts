@@ -1,7 +1,7 @@
 import { Scene } from 'phaser';
+import { TILE_W, TILE_H, MOVE_TWEEN_DURATION, FONT } from '../GameConfig';
 
-export const TILE_W = 64;
-export const TILE_H = 32;
+export { TILE_W, TILE_H };
 
 export interface TilePos {
     x: number;
@@ -18,6 +18,8 @@ export abstract class Entity {
     protected map: Phaser.Tilemaps.Tilemap;
     protected checkWalkable: (x: number, y: number) => boolean;
     private nameLabel!: Phaser.GameObjects.Text;
+    private sleeping = false;
+    private zzzLabel: Phaser.GameObjects.Text | null = null;
 
     constructor(
         scene: Scene,
@@ -47,13 +49,9 @@ export abstract class Entity {
         this.sprite.play('idle-down');
         this.updateDepth();
 
-        this.nameLabel = this.scene.add.text(0, 0, this.name, {
-            fontSize: '11px',
-            color: '#ffffff',
-            fontFamily: 'Arial, sans-serif',
-            stroke: '#000000',
-            strokeThickness: 3,
-        });
+        this.nameLabel = this.scene.add.text(0, 0, this.name,
+            FONT.label as Phaser.Types.GameObjects.Text.TextStyle,
+        );
         this.nameLabel.setOrigin(0.5, 1);
     }
 
@@ -70,43 +68,9 @@ export abstract class Entity {
 
         if (!this.checkWalkable(targetX, targetY)) return false;
 
-        let direction: string;
-        if (dy < 0) direction = 'up';
-        else if (dy > 0) direction = 'down';
-        else if (dx < 0) direction = 'left';
-        else direction = 'right';
-
-        this.tilePos.x = targetX;
-        this.tilePos.y = targetY;
-        this.lastDirection = direction;
-        this.updateDepth();
-
-        this.sprite.play('walk-' + direction, true);
-
-        const worldPos = this.map.tileToWorldXY(targetX, targetY)!;
-        this.isMoving = true;
-
-        this.scene.tweens.add({
-            targets: this.sprite,
-            x: worldPos.x + TILE_W / 2,
-            y: worldPos.y + TILE_H / 2,
-            duration: 180,
-            ease: 'Power2',
-            onComplete: () => {
-                this.isMoving = false;
-                this.sprite.play('idle-' + this.lastDirection, true);
-            },
-        });
-
+        // Fire-and-forget: start the async move but don't await it
+        this.moveToAsync(dx, dy);
         return true;
-    }
-
-    updateLabel() {
-        this.nameLabel.setPosition(
-            this.sprite.x,
-            this.sprite.y - this.sprite.height * this.sprite.originY - 2,
-        );
-        this.nameLabel.setDepth(this.sprite.depth + 0.5);
     }
 
     /** Returns a promise that resolves when the move tween finishes. */
@@ -137,7 +101,7 @@ export abstract class Entity {
                 targets: this.sprite,
                 x: worldPos.x + TILE_W / 2,
                 y: worldPos.y + TILE_H / 2,
-                duration: 180,
+                duration: MOVE_TWEEN_DURATION,
                 ease: 'Power2',
                 onComplete: () => {
                     this.isMoving = false;
@@ -154,10 +118,51 @@ export abstract class Entity {
         return (dx + dy) === 1;
     }
 
+    setSleeping(asleep: boolean): void {
+        if (asleep === this.sleeping) return;
+        this.sleeping = asleep;
+
+        if (asleep) {
+            this.sprite.play('idle-down', true);
+            this.sprite.setAngle(90);
+            this.sprite.setAlpha(0.7);
+
+            this.zzzLabel = this.scene.add.text(0, 0, 'zzZ',
+                FONT.label as Phaser.Types.GameObjects.Text.TextStyle,
+            );
+            this.zzzLabel.setOrigin(0.5, 1);
+            this.zzzLabel.setAlpha(0.8);
+        } else {
+            this.sprite.setAngle(0);
+            this.sprite.setAlpha(1);
+            this.sprite.play('idle-' + this.lastDirection, true);
+
+            this.zzzLabel?.destroy();
+            this.zzzLabel = null;
+        }
+    }
+
+    updateLabel() {
+        this.nameLabel.setPosition(
+            this.sprite.x,
+            this.sprite.y - this.sprite.height * this.sprite.originY - 2,
+        );
+        this.nameLabel.setDepth(this.sprite.depth + 0.5);
+
+        if (this.zzzLabel) {
+            this.zzzLabel.setPosition(
+                this.sprite.x + 12,
+                this.sprite.y - this.sprite.height * this.sprite.originY - 14,
+            );
+            this.zzzLabel.setDepth(this.sprite.depth + 0.5);
+        }
+    }
+
     abstract update(time: number, delta: number): void;
 
     destroy() {
         this.nameLabel.destroy();
+        this.zzzLabel?.destroy();
         this.sprite.destroy();
     }
 }

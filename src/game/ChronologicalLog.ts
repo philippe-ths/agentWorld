@@ -1,4 +1,5 @@
-import { SUMMARIZE, SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET } from './prompts';
+import { SUMMARIZE } from './prompts';
+import { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, LLM_ENDPOINTS } from './GameConfig';
 
 export { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET };
 
@@ -72,7 +73,7 @@ export class ChronologicalLog {
     }
 
     async load(): Promise<void> {
-        const res = await fetch(`/api/logs/${encodeURIComponent(this.npcName)}`);
+        const res = await fetch(`${LLM_ENDPOINTS.logs}/${encodeURIComponent(this.npcName)}`);
         if (!res.ok) return;
         const { content } = await res.json();
         const parsed = parseMarkdown(content);
@@ -86,7 +87,7 @@ export class ChronologicalLog {
         for (const e of this.entries) parts.push(serializeEntry(e));
         const content = parts.join('\n\n') + '\n';
 
-        await fetch(`/api/logs/${encodeURIComponent(this.npcName)}`, {
+        await fetch(`${LLM_ENDPOINTS.logs}/${encodeURIComponent(this.npcName)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content }),
@@ -159,7 +160,7 @@ export class ChronologicalLog {
 
         let summary: string;
         try {
-            const res = await fetch('/api/chat', {
+            const res = await fetch(LLM_ENDPOINTS.chat, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

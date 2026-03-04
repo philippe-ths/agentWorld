@@ -1,4 +1,5 @@
 import { DECISION, CONVERSATION } from './prompts';
+import { LLM_ENDPOINTS } from './GameConfig';
 
 export interface ConversationMessage {
     speaker: string;
@@ -48,7 +49,7 @@ export class LLMService {
 
         let response: Response;
         try {
-            response = await fetch('/api/chat', {
+            response = await fetch(LLM_ENDPOINTS.chat, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -111,7 +112,7 @@ export class LLMService {
 
         let response: Response;
         try {
-            response = await fetch('/api/chat', {
+            response = await fetch(LLM_ENDPOINTS.chat, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

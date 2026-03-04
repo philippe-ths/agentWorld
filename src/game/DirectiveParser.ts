@@ -30,8 +30,18 @@ export interface SwitchGoalDirective {
     type: 'switch_goal';
 }
 
+export interface UseToolDirective {
+    type: 'use_tool';
+    toolId: string;
+    args: string;
+}
+
+export interface SleepDirective {
+    type: 'sleep';
+}
+
 export type Directive = MoveToDirective | WaitDirective | StartConversationDirective | EndConversationDirective
-    | CompleteGoalDirective | AbandonGoalDirective | SwitchGoalDirective;
+    | CompleteGoalDirective | AbandonGoalDirective | SwitchGoalDirective | UseToolDirective | SleepDirective;
 
 const MOVE_TO_RE = /^move_to\(\s*(\d+)\s*,\s*(\d+)\s*\)$/;
 const WAIT_RE = /^wait\(\s*\)$/;
@@ -40,6 +50,8 @@ const END_CONVO_RE = /^end_conversation\(\s*\)$/;
 const COMPLETE_GOAL_RE = /^complete_goal\(\s*\)$/;
 const ABANDON_GOAL_RE = /^abandon_goal\(\s*\)$/;
 const SWITCH_GOAL_RE = /^switch_goal\(\s*\)$/;
+const USE_TOOL_RE = /^use_tool\(\s*([a-z_][a-z0-9_]*)\s*,\s*"(.+)"\s*\)$/;
+const SLEEP_RE = /^sleep\(\s*\)$/;
 
 export function parseDirectives(text: string): Directive[] {
     const directives: Directive[] = [];
@@ -64,6 +76,10 @@ export function parseDirectives(text: string): Directive[] {
             directives.push({ type: 'abandon_goal' });
         } else if (SWITCH_GOAL_RE.test(line)) {
             directives.push({ type: 'switch_goal' });
+        } else if ((match = line.match(USE_TOOL_RE))) {
+            directives.push({ type: 'use_tool', toolId: match[1], args: match[2] });
+        } else if (SLEEP_RE.test(line)) {
+            directives.push({ type: 'sleep' });
         } else {
             console.warn(`%c[DirectiveParser] Unknown directive: "${line}"`, 'color: #ffaa00; font-weight: bold');
         }

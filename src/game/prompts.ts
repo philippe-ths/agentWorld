@@ -1,3 +1,14 @@
+import {
+    LLM_MODEL_OPUS,
+    LLM_MODEL_SONNET,
+    LLM_MODEL_HAIKU,
+    SUMMARIZE_EVERY_N_TURNS,
+    LOG_CHAR_BUDGET,
+    MAX_EXCHANGES,
+} from './GameConfig';
+
+export { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, MAX_EXCHANGES };
+
 // ── Types ────────────────────────────────────────────────────
 
 export interface PromptConfig {
@@ -6,37 +17,35 @@ export interface PromptConfig {
     buildSystem: (...args: string[]) => string;
 }
 
-// ── Gameplay tuning ──────────────────────────────────────────
-
-export const SUMMARIZE_EVERY_N_TURNS = 5;
-export const LOG_CHAR_BUDGET = 4000;
-export const MAX_EXCHANGES = 6;
-
 // ── Per-prompt configs ───────────────────────────────────────
 
 /**
  * NPC turn-decision prompt.
  * Context: memory (chronological log), goals (active/pending), world state (map + all entity positions).
+ * Uses Opus (most intelligent) for complex reasoning about game state and planning.
  */
 export const DECISION: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL_OPUS,
     maxTokens: 256,
     buildSystem: () => `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC. 
 Each turn you receive a map, your memory, and your current goal (if any).
 If you have a goal, work toward it. If you think you have completed a goal mark as complete. 
 Use your memory to avoid getting stuck repeating Actions.
-If you have no goal, you have no particular objective. You may wait.
+If you have no goal, you have no particular objective. You may sleep to conserve energy.
 
 Available commands (you get up to 3 per turn):
   move_to(x,y) — walk to tile (x,y), you don't have to specify the path, just the destination. The game will figure out a path.
   wait()       — do nothing this action
-  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation
+  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation — ends your turn immediately
+  use_tool(tool_id, "arguments") — you must be adjacent to entity to use a tool building — ends your turn immediately. Tools are marked on the map. 
+  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing to do. You CANNOT sleep if you have a goal. Another entity can still wake you by starting a conversation.
   complete_goal() — mark your active goal as done
   abandon_goal() — give up on your active goal
   switch_goal() — abandon active goal and start working on your pending goal
 
 Goal directives (complete_goal, abandon_goal, switch_goal) do not count toward your 3-command limit.
 If your current goal seems impossible or no longer relevant, you may abandon it.
+Entities and buildings occupy their tile. You cannot walk onto an occupied tile. To interact with an entity or use a tool, move to a tile next to them, not their exact position.
 
 Respond ONLY with commands, one per line. No commentary. Example:
 complete_goal()
@@ -47,9 +56,10 @@ start_conversation_with(Bjorn, I noticed something at the eastern pond)`,
 /**
  * In-conversation response prompt.
  * Context: memory (chronological log), world state, conversation history (speaker: text pairs).
+ * Uses Opus (most intelligent) for nuanced conversational responses and intent understanding.
  */
 export const CONVERSATION: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL_OPUS,
     maxTokens: 512,
     buildSystem: () => `You are an NPC in a conversation with another entity.
 Respond in character. 
@@ -68,9 +78,10 @@ Respond with ONE of:
 /**
  * Memory-compression prompt.
  * Context: chronological log entries eligible for summarization (oldest turns as markdown).
+ * Uses Haiku (least intelligent) for straightforward summarization tasks.
  */
 export const SUMMARIZE: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL_HAIKU,
     maxTokens: 512,
     buildSystem: () =>
         'You are a memory compressor for an NPC in a 2D game. ' +
@@ -82,9 +93,10 @@ export const SUMMARIZE: PromptConfig = {
 /**
  * Goal-extraction prompt (parameterized by NPC name).
  * Context: current goals (active/pending), world state, conversation transcript.
+ * Uses Sonnet (medium intelligence) for structured goal analysis and categorization.
  */
 export const GOAL_EXTRACTION: PromptConfig = {
-    model: 'claude-sonnet-4-20250514',
+    model: LLM_MODEL_SONNET,
     maxTokens: 128,
     buildSystem: (npcName: string) => `You are analyzing a conversation transcript for an NPC called ${npcName}.
 Does this conversation contain a NEW request, task, objective, or intention

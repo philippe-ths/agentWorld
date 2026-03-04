@@ -40,8 +40,27 @@ export interface SleepDirective {
     type: 'sleep';
 }
 
+export interface CreateFunctionDirective {
+    type: 'create_function';
+    description: string;
+    x: number;
+    y: number;
+}
+
+export interface UpdateFunctionDirective {
+    type: 'update_function';
+    functionName: string;
+    changeDescription: string;
+}
+
+export interface DeleteFunctionDirective {
+    type: 'delete_function';
+    functionName: string;
+}
+
 export type Directive = MoveToDirective | WaitDirective | StartConversationDirective | EndConversationDirective
-    | CompleteGoalDirective | AbandonGoalDirective | SwitchGoalDirective | UseToolDirective | SleepDirective;
+    | CompleteGoalDirective | AbandonGoalDirective | SwitchGoalDirective | UseToolDirective | SleepDirective
+    | CreateFunctionDirective | UpdateFunctionDirective | DeleteFunctionDirective;
 
 const MOVE_TO_RE = /^move_to\(\s*(\d+)\s*,\s*(\d+)\s*\)$/;
 const WAIT_RE = /^wait\(\s*\)$/;
@@ -52,6 +71,9 @@ const ABANDON_GOAL_RE = /^abandon_goal\(\s*\)$/;
 const SWITCH_GOAL_RE = /^switch_goal\(\s*\)$/;
 const USE_TOOL_RE = /^use_tool\(\s*([a-z_][a-z0-9_]*)\s*,\s*"(.+)"\s*\)$/;
 const SLEEP_RE = /^sleep\(\s*\)$/;
+const CREATE_FUNCTION_RE = /^create_function\(\s*"(.+)"\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/;
+const UPDATE_FUNCTION_RE = /^update_function\(\s*"([a-z_][a-z0-9_]*)"\s*,\s*"(.+)"\s*\)$/;
+const DELETE_FUNCTION_RE = /^delete_function\(\s*"([a-z_][a-z0-9_]*)"\s*\)$/;
 
 export function parseDirectives(text: string): Directive[] {
     const directives: Directive[] = [];
@@ -80,6 +102,24 @@ export function parseDirectives(text: string): Directive[] {
             directives.push({ type: 'use_tool', toolId: match[1], args: match[2] });
         } else if (SLEEP_RE.test(line)) {
             directives.push({ type: 'sleep' });
+        } else if ((match = line.match(CREATE_FUNCTION_RE))) {
+            directives.push({
+                type: 'create_function',
+                description: match[1],
+                x: parseInt(match[2]),
+                y: parseInt(match[3]),
+            });
+        } else if ((match = line.match(UPDATE_FUNCTION_RE))) {
+            directives.push({
+                type: 'update_function',
+                functionName: match[1],
+                changeDescription: match[2],
+            });
+        } else if ((match = line.match(DELETE_FUNCTION_RE))) {
+            directives.push({
+                type: 'delete_function',
+                functionName: match[1],
+            });
         } else {
             console.warn(`%c[DirectiveParser] Unknown directive: "${line}"`, 'color: #ffaa00; font-weight: bold');
         }

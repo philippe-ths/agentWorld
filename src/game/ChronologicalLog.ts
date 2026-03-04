@@ -208,10 +208,10 @@ export class ChronologicalLog {
         }
         lines.push(`[Conversation ended by ${transcript.endedBy}]`);
 
-        if (this.currentEntry) {
+        if (this.currentEntry && this.currentEntry.turnNumber === transcript.turnNumber) {
             this.currentEntry.lines.push(lines.join('\n'));
         } else {
-            // No current turn entry — create a standalone entry
+            // No current entry or stale entry from a different turn — create standalone
             this.entries.push({ turnNumber: transcript.turnNumber, lines });
         }
     }

@@ -1,6 +1,6 @@
 import { TilePos } from './entities/Entity';
 import { ToolBuilding } from './ToolBuilding';
-import { BuildingDef } from './GameConfig';
+import { BuildingDef, FunctionRecord } from './GameConfig';
 
 export class ToolRegistry {
     private buildings = new Map<string, ToolBuilding>();
@@ -28,6 +28,29 @@ export class ToolRegistry {
 
     register(building: ToolBuilding): void {
         this.buildings.set(building.id, building);
+    }
+
+    unregister(id: string): boolean {
+        return this.buildings.delete(id);
+    }
+
+    registerFunctionBuilding(
+        record: FunctionRecord,
+        execute: (args: string) => Promise<string>,
+    ): void {
+        const parameterSummary = record.parameters
+            .map(p => `${p.name}: ${p.type}`)
+            .join(', ');
+
+        this.register({
+            id: record.name,
+            displayName: record.name,
+            tile: record.tile,
+            symbol: 'F',
+            description: record.description,
+            instructions: `Parameters: ${parameterSummary || 'none'} | Returns: ${record.returnDescription} | Use: use_tool(${record.name}, "arg1, arg2, ..."). Ends your turn immediately.`,
+            execute,
+        });
     }
 
     getAll(): ToolBuilding[] {

@@ -10,7 +10,7 @@ import { ConversationManager } from '../ConversationManager';
 import { showSpeechBubble } from '../ui/SpeechBubble';
 import { DialogueBox } from '../ui/DialogueBox';
 import { ToolRegistry } from '../ToolRegistry';
-import { searchWeb } from '../ToolService';
+import { executeFunction, loadFunctionRecords, searchWeb } from '../ToolService';
 import { FONT, NPCS, PLAYER_SPAWN, BUILDINGS } from '../GameConfig';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
@@ -25,6 +25,9 @@ export class GameScene extends Scene {
     private dialogueBox!: DialogueBox;
     private interactKey!: Phaser.Input.Keyboard.Key;
     private toolRegistry!: ToolRegistry;
+    private buildingSprites: Phaser.GameObjects.Image[] = [];
+    private buildingLabels: Phaser.GameObjects.Text[] = [];
+    private buildingRenderSignature = '';
 
     constructor() {
         super('GameScene');
@@ -43,6 +46,7 @@ export class GameScene extends Scene {
         this.spawnNPCs();
         this.setupCamera();
         this.placeBuildingLabels();
+        void this.loadPersistedFunctions();
 
         // Temporary: log world state so we can inspect the format
         console.log(buildWorldState(this.player, this.entityManager.getEntities(), this.toolRegistry));
@@ -65,6 +69,7 @@ export class GameScene extends Scene {
                 closeDialogue: () => this.dialogueBox.close(),
                 addDialogueMessage: (speaker, text) => this.dialogueBox.addMessage(speaker, text),
             },
+            this.toolRegistry,
         );
         this.turnManager.setConversationManager(this.conversationManager);
 
@@ -190,6 +195,7 @@ export class GameScene extends Scene {
 
         // Register tool handlers
         registry.registerHandler('search', searchWeb);
+        registry.registerHandler('code_forge', async () => 'Use create_function/update_function/delete_function when adjacent to Code Forge.');
 
         // Register buildings from config
         for (const def of BUILDINGS) {
@@ -200,6 +206,8 @@ export class GameScene extends Scene {
     }
 
     private placeBuildingLabels(): void {
+        this.clearBuildingVisuals();
+
         for (const building of this.toolRegistry.getAll()) {
             const worldPos = this.map.tileToWorldXY(building.tile.x, building.tile.y)!;
             const depth = building.tile.x + building.tile.y + 1;
@@ -212,6 +220,7 @@ export class GameScene extends Scene {
             );
             house.setOrigin(0.5, 1);
             house.setDepth(depth);
+            this.buildingSprites.push(house);
 
             // Name label above the house
             const label = this.add.text(
@@ -222,7 +231,10 @@ export class GameScene extends Scene {
             );
             label.setOrigin(0.5, 1);
             label.setDepth(depth + 0.5);
+            this.buildingLabels.push(label);
         }
+
+        this.buildingRenderSignature = this.getBuildingSignature();
     }
 
     // ── Camera ───────────────────────────────────────────────
@@ -251,6 +263,9 @@ export class GameScene extends Scene {
         // Suppress player movement while in a conversation
         if (!this.dialogueBox.isOpen()) {
             this.player.update(time, delta);
+        }
+        if (this.buildingRenderSignature !== this.getBuildingSignature()) {
+            this.placeBuildingLabels();
         }
         this.turnManager.updateVisuals(this.entityManager.getEntities());
     }
@@ -291,5 +306,37 @@ export class GameScene extends Scene {
         }
 
         return null;
+    }
+
+    private clearBuildingVisuals(): void {
+        for (const sprite of this.buildingSprites) sprite.destroy();
+        for (const label of this.buildingLabels) label.destroy();
+        this.buildingSprites = [];
+        this.buildingLabels = [];
+    }
+
+    private getBuildingSignature(): string {
+        return this.toolRegistry.getAll()
+            .map(b => `${b.id}@${b.tile.x},${b.tile.y}`)
+            .sort()
+            .join('|');
+    }
+
+    private async loadPersistedFunctions(): Promise<void> {
+        const records = await loadFunctionRecords();
+        for (const record of records) {
+            const parameterNames = record.parameters.map(p => p.name);
+            this.toolRegistry.registerFunctionBuilding(record, async (rawArgs: string) => {
+                const parsedArgs = rawArgs
+                    ? rawArgs.split(',').map(v => v.trim()).filter(Boolean)
+                    : [];
+                const execution = await executeFunction(parameterNames, record.code, parsedArgs);
+                return execution.ok ? execution.result : `Error: ${execution.result}`;
+            });
+        }
+
+        if (records.length > 0) {
+            this.placeBuildingLabels();
+        }
     }
 }

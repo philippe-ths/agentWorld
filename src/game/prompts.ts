@@ -38,6 +38,9 @@ Available commands (you get up to 3 per turn):
   wait()       — do nothing this action
   start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation — ends your turn immediately
   use_tool(tool_id, "arguments") — you must be adjacent to entity to use a tool building — ends your turn immediately. Tools are marked on the map. 
+  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge — ends your turn immediately
+  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge — ends your turn immediately
+  delete_function("function_name") — you must be adjacent to Code Forge — ends your turn immediately
   sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing to do. You CANNOT sleep if you have a goal. Another entity can still wake you by starting a conversation.
   complete_goal() — mark your active goal as done
   abandon_goal() — give up on your active goal
@@ -62,13 +65,17 @@ export const CONVERSATION: PromptConfig = {
     model: LLM_MODEL_OPUS,
     maxTokens: 512,
     buildSystem: () => `You are an NPC in a conversation with another entity.
-Respond in character. 
-Be concise. 
-Be helpful.
-You are a cooperative NPC.
-The purpose of conversation is to exchange useful information. 
-Do not make idle small talk. If you have nothing important to say, end the conversation.
-Keep your responses to 1-2 sentences.
+Respond in character. Be concise. Keep responses to 1-2 sentences.
+
+Your role in conversation is to exchange information and accept tasks.
+Do not plan how you will accomplish a task — no tile coordinates, tool names, or route descriptions.
+Planning happens after the conversation, not during it.
+
+If someone asks you to do something, simply accept it.
+Assume any task is possible. Only ask for clarification if the intent of the request is unclear.
+Do not refuse, argue, or explain limitations.
+
+If you have nothing important to say, end the conversation.
 
 Respond with ONE of:
   say(your message here)
@@ -87,7 +94,7 @@ export const SUMMARIZE: PromptConfig = {
         'You are a memory compressor for an NPC in a 2D game. ' +
         'Given a series of chronological log entries, produce a single concise narrative paragraph ' +
         'that preserves key facts, decisions, spatial observations, and interactions. ' +
-        'Drop trivial or redundant details. Write in third person past tense.',
+        'Drop trivial or redundant details. Write in first person past tense.',
 };
 
 /**
@@ -97,30 +104,52 @@ export const SUMMARIZE: PromptConfig = {
  */
 export const GOAL_EXTRACTION: PromptConfig = {
     model: LLM_MODEL_SONNET,
-    maxTokens: 128,
-    buildSystem: (npcName: string) => `You are analyzing a conversation transcript for an NPC called ${npcName}.
-Does this conversation contain a NEW request, task, objective, or intention
-that ${npcName} should pursue?
+  maxTokens: 256,
+    buildSystem: (npcName: string) => `You are extracting goals from a conversation transcript for an NPC called ${npcName}.
 
-This includes:
+If the conversation contains ANY task, request, commitment, or intention that ${npcName} should pursue, extract it as a goal. This includes:
 - Direct requests from the other party ("go check the pond")
-- Agreements the NPC made ("I'll head north and meet you there")
+- Agreements ${npcName} made ("I'll head north and meet you there")
 - Self-initiated intentions ("I want to find out what's over there")
 
-IMPORTANT: If ${npcName} already has an active or pending goal that matches
-what the conversation suggests, respond with none(). Do not re-extract a goal
-that is already being tracked.
+Respond with the goal in this exact format:
+Source: (who or what prompted this goal, in one sentence)
+Goal: (the objective in one sentence)
+Status: active
+Plan: (steps to achieve the goal, in plain English, no commands or tile positions)
+Success: (what does success look like, in plain English)
 
-If yes, respond with the goal in this exact format:
-  ## Active Goal
-  Source: (who or what prompted this goal, in one sentence)
-  Goal: (the objective in one sentence)
-  Status: active
-  Plan: (concrete steps how to achieve the goal, in plain English, do not quote commands or include tile positions)
-  Success: (what does success look like? in plain English)
+Keep each field to 1 sentence so the full response fits.
 
-If no, respond with:
-  none()
+Only respond with none() if:
+- The conversation contains no actionable task or intention, OR
+- ${npcName} already has a current goal that matches what the conversation suggests
 
 Respond with exactly one goal or none(). No commentary.`,
+};
+
+/**
+ * Code-generation prompt.
+ * Context: a natural-language function request, and optionally existing function code for updates.
+ */
+export const CODE_GENERATION: PromptConfig = {
+    model: LLM_MODEL_SONNET,
+    maxTokens: 512,
+    buildSystem: () => `You generate JavaScript function implementations for a game sandbox.
+Rules:
+- Return valid JSON only. No markdown, no explanations.
+- Write pure synchronous JavaScript function body only (statements inside the function), not a full function declaration.
+- No side effects, no async, no imports, no require, no process, no fetch, no filesystem, no network.
+- Use only standard JavaScript built-ins.
+- Keep implementation short and focused.
+- Function name must be snake_case.
+
+Return JSON with this exact shape:
+{
+  "name": "snake_case_name",
+  "description": "one line description",
+  "parameters": [{"name": "input", "type": "string"}],
+  "returnDescription": "what this returns",
+  "code": "function body as a string"
+}`,
 };

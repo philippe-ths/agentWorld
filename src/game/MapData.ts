@@ -87,3 +87,17 @@ function generateMap(width: number, height: number, seed: number): number[][] {
 }
 
 export const MAP_DATA: number[][] = generateMap(MAP_WIDTH, MAP_HEIGHT, MAP_SEED);
+
+export function isWithinMapBounds(x: number, y: number): boolean {
+    return x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT;
+}
+
+export function isGrassTile(x: number, y: number): boolean {
+    if (!isWithinMapBounds(x, y)) return false;
+    return MAP_DATA[y][x] === 0;
+}
+
+export function isSpawnTile(x: number, y: number): boolean {
+    if (PLAYER_SPAWN.x === x && PLAYER_SPAWN.y === y) return true;
+    return NPCS.some(npc => npc.tile.x === x && npc.tile.y === y);
+}

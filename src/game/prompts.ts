@@ -1,5 +1,7 @@
 import {
-    LLM_MODEL,
+    LLM_MODEL_OPUS,
+    LLM_MODEL_SONNET,
+    LLM_MODEL_HAIKU,
     SUMMARIZE_EVERY_N_TURNS,
     LOG_CHAR_BUDGET,
     MAX_EXCHANGES,
@@ -20,9 +22,10 @@ export interface PromptConfig {
 /**
  * NPC turn-decision prompt.
  * Context: memory (chronological log), goals (active/pending), world state (map + all entity positions).
+ * Uses Opus (most intelligent) for complex reasoning about game state and planning.
  */
 export const DECISION: PromptConfig = {
-    model: LLM_MODEL,
+    model: LLM_MODEL_OPUS,
     maxTokens: 256,
     buildSystem: () => `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC. 
 Each turn you receive a map, your memory, and your current goal (if any).
@@ -53,9 +56,10 @@ start_conversation_with(Bjorn, I noticed something at the eastern pond)`,
 /**
  * In-conversation response prompt.
  * Context: memory (chronological log), world state, conversation history (speaker: text pairs).
+ * Uses Opus (most intelligent) for nuanced conversational responses and intent understanding.
  */
 export const CONVERSATION: PromptConfig = {
-    model: LLM_MODEL,
+    model: LLM_MODEL_OPUS,
     maxTokens: 512,
     buildSystem: () => `You are an NPC in a conversation with another entity.
 Respond in character. 
@@ -74,9 +78,10 @@ Respond with ONE of:
 /**
  * Memory-compression prompt.
  * Context: chronological log entries eligible for summarization (oldest turns as markdown).
+ * Uses Haiku (least intelligent) for straightforward summarization tasks.
  */
 export const SUMMARIZE: PromptConfig = {
-    model: LLM_MODEL,
+    model: LLM_MODEL_HAIKU,
     maxTokens: 512,
     buildSystem: () =>
         'You are a memory compressor for an NPC in a 2D game. ' +
@@ -88,9 +93,10 @@ export const SUMMARIZE: PromptConfig = {
 /**
  * Goal-extraction prompt (parameterized by NPC name).
  * Context: current goals (active/pending), world state, conversation transcript.
+ * Uses Sonnet (medium intelligence) for structured goal analysis and categorization.
  */
 export const GOAL_EXTRACTION: PromptConfig = {
-    model: LLM_MODEL,
+    model: LLM_MODEL_SONNET,
     maxTokens: 128,
     buildSystem: (npcName: string) => `You are analyzing a conversation transcript for an NPC called ${npcName}.
 Does this conversation contain a NEW request, task, objective, or intention

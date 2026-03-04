@@ -17,7 +17,10 @@ export const MAX_REPATH_ATTEMPTS = 5;
 
 // ── LLM ──────────────────────────────────────────────────────
 
-export const LLM_MODEL = 'claude-sonnet-4-20250514';
+// Model selection by intelligence tier (most → least intelligent)
+export const LLM_MODEL_OPUS = 'claude-opus-4-20250514';
+export const LLM_MODEL_SONNET = 'claude-sonnet-4-20250514';
+export const LLM_MODEL_HAIKU = 'claude-haiku-4-20250514';
 
 export const LLM_ENDPOINTS = {
     chat: '/api/chat',

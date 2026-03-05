@@ -45,6 +45,7 @@ Each NPC gets a budget of **3 action commands per turn** (`NPC_COMMANDS_PER_TURN
 | `complete_goal()` | Mark the active goal as done | No |
 | `abandon_goal()` | Give up on the active goal | No |
 | `switch_goal()` | Abandon active, promote pending to active | No |
+| *(unknown)* | If an unparseable or misspelled line is detected, it is intercepted and explicitly logged as an error to the NPC so they can correct themselves. | Yes |
 
 If the LLM returns more than 3 action commands, the extras are silently dropped.
 

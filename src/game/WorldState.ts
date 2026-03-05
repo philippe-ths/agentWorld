@@ -1,5 +1,5 @@
 import { Entity } from './entities/Entity';
-import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA } from './MapData';
+import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA, getAdjacentBuildings } from './MapData';
 import { ToolRegistry } from './ToolRegistry';
 
 const TILE_CHARS: Record<number, string> = {
@@ -58,7 +58,7 @@ export function buildWorldState(observer: Entity, allEntities: Entity[], toolReg
 
     // Nearby tools (adjacency-gated instructions)
     if (toolRegistry) {
-        const nearby = toolRegistry.getAdjacentBuildings(observer.tilePos);
+        const nearby = getAdjacentBuildings(observer.tilePos, buildings);
         if (nearby.length > 0) {
             lines.push('');
             lines.push('NEARBY TOOLS:');

@@ -1,4 +1,6 @@
 import { PLAYER_SPAWN, NPCS, BUILDINGS, MAP_SEED, MAP_COLS, MAP_ROWS } from './GameConfig';
+import { TilePos } from './entities/Entity';
+import { ToolBuilding } from './ToolBuilding';
 
 export const TILE_WATER = 1;
 
@@ -100,4 +102,27 @@ export function isGrassTile(x: number, y: number): boolean {
 export function isSpawnTile(x: number, y: number): boolean {
     if (PLAYER_SPAWN.x === x && PLAYER_SPAWN.y === y) return true;
     return NPCS.some(npc => npc.tile.x === x && npc.tile.y === y);
+}
+
+export function getBuildingAt(buildings: ToolBuilding[], x: number, y: number): ToolBuilding | undefined {
+    return buildings.find(b => b.tile.x === x && b.tile.y === y);
+}
+
+export function isBuildingAt(buildings: ToolBuilding[], x: number, y: number): boolean {
+    return getBuildingAt(buildings, x, y) !== undefined;
+}
+
+export function isAdjacentToBuilding(pos: TilePos, building: ToolBuilding | undefined): boolean {
+    if (!building) return false;
+    const dx = Math.abs(pos.x - building.tile.x);
+    const dy = Math.abs(pos.y - building.tile.y);
+    return (dx + dy) === 1;
+}
+
+export function getAdjacentBuildings(pos: TilePos, buildings: ToolBuilding[]): ToolBuilding[] {
+    return buildings.filter(b => {
+        const dx = Math.abs(pos.x - b.tile.x);
+        const dy = Math.abs(pos.y - b.tile.y);
+        return (dx + dy) === 1;
+    });
 }

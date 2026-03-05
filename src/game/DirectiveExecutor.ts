@@ -4,6 +4,7 @@ import { GoalManager } from './GoalManager';
 import { ConversationManager } from './ConversationManager';
 import { ToolRegistry } from './ToolRegistry';
 import { Directive } from './DirectiveParser';
+import { isAdjacentToBuilding } from './MapData';
 
 export class DirectiveExecutor {
     private conversationManager!: ConversationManager;
@@ -92,7 +93,7 @@ export class DirectiveExecutor {
                     log.recordAction(`I tried to use unknown tool "${dir.toolId}"`);
                     return false;
                 }
-                if (!this.toolRegistry.isAdjacentTo(npc.tilePos, dir.toolId)) {
+                if (!isAdjacentToBuilding(npc.tilePos, building)) {
                     console.log(`%c[${npc.name}] use_tool(${dir.toolId}) — not adjacent`, 'color: #ffaa00');
                     log.recordAction(`I tried to use ${building.displayName} but I'm not close enough — I need to be adjacent to (${building.tile.x},${building.tile.y})`);
                     return false;

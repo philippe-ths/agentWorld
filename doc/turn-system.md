@@ -22,7 +22,7 @@ Each NPC turn:
 7. Call the LLM for a decision (world state + memory + goals)
 8. Parse the response into directives
 9. Execute goal directives instantly (no budget cost), then up to 3 action commands via `DirectiveExecutor`. Each runs to completion before the next. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
-10. Handle function directives (`create_function`, `update_function`, `delete_function`)
+10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`.
 11. Save the log and goals to disk
 12. Summarize old log entries if enough have accumulated
 13. Wait 5 seconds before the next NPC
@@ -98,7 +98,8 @@ A fixed label in the top-left corner shows:
 
 | File | Role |
 |------|------|
-| `src/game/TurnManager.ts` | Turn loop, sleep tracking, function handling, log/goal integration, pause control |
+| `src/game/TurnManager.ts` | Turn loop, sleep tracking, log/goal integration, pause control |
+| `src/game/FunctionBuilderService.ts` | Handles the UI and prompt pipeline when crafting, modifying, or deleting function tools |
 | `src/game/DirectiveExecutor.ts` | Executes parsed directives — movement, tools, goals, sleep |
 | `src/game/DirectiveParser.ts` | Parses LLM text into typed directive objects |
 | `src/game/GameConfig.ts` | Constants: `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`, `NPC_TURN_DELAY` |

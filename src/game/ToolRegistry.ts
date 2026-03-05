@@ -1,4 +1,3 @@
-import { TilePos } from './entities/Entity';
 import { ToolBuilding } from './ToolBuilding';
 import { BuildingDef, FunctionRecord } from './GameConfig';
 
@@ -59,32 +58,5 @@ export class ToolRegistry {
 
     getById(id: string): ToolBuilding | undefined {
         return this.buildings.get(id);
-    }
-
-    getBuildingAt(x: number, y: number): ToolBuilding | undefined {
-        for (const b of this.buildings.values()) {
-            if (b.tile.x === x && b.tile.y === y) return b;
-        }
-        return undefined;
-    }
-
-    isBuildingAt(x: number, y: number): boolean {
-        return this.getBuildingAt(x, y) !== undefined;
-    }
-
-    isAdjacentTo(pos: TilePos, toolId: string): boolean {
-        const building = this.buildings.get(toolId);
-        if (!building) return false;
-        const dx = Math.abs(pos.x - building.tile.x);
-        const dy = Math.abs(pos.y - building.tile.y);
-        return (dx + dy) === 1;
-    }
-
-    getAdjacentBuildings(pos: TilePos): ToolBuilding[] {
-        return this.getAll().filter(b => {
-            const dx = Math.abs(pos.x - b.tile.x);
-            const dy = Math.abs(pos.y - b.tile.y);
-            return (dx + dy) === 1;
-        });
     }
 }

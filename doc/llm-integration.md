@@ -62,7 +62,7 @@ Used by `GoalExtractor.extractGoal()` after conversations end. The system prompt
 
 ### 5. Code Generation (`CODE_GENERATION`)
 
-Used by `ToolService.generateFunctionSpec()` when an NPC creates or updates a function at the Code Forge. The system prompt instructs the LLM to generate a synchronous, pure JS function implementation.
+Used by `ToolService.generateFunctionSpec()` (working alongside `validation.ts`) when an NPC creates or updates a function at the Code Forge via the `FunctionBuilderService`. The system prompt instructs the LLM to generate a synchronous, pure JS function implementation.
 
 **Model:** Sonnet | **Max tokens:** 512
 

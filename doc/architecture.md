@@ -16,13 +16,15 @@ src/
     DirectiveParser.ts     Parses LLM text responses into typed directive objects
     DirectiveExecutor.ts   Executes parsed directives — movement, tools, goals, sleep
     TurnManager.ts         Orchestrates NPC turn loop, sleep tracking, pause/resume
+    FunctionBuilderService.ts Handles tool creation validations and UI flows specific to LLM-generated code functions
+    validation.ts          JSON and object validation schemas for functions and network payloads
     ChronologicalLog.ts    Per-NPC memory — records observations/actions, summarizes old turns
     ConversationManager.ts Manages NPC-NPC and player-NPC conversations via LLM
     GoalManager.ts         Per-NPC goal persistence — active/pending goals, promotion, serialization
     GoalExtractor.ts       Extracts new goals from conversation transcripts via LLM
     ToolBuilding.ts        Interface for interactive building objects (tools)
-    ToolRegistry.ts        Registry for all tool buildings — lookup by id, position, adjacency
-    ToolService.ts         Web search, code generation, sandboxed execution, function persistence
+    ToolRegistry.ts        Registry mapping interactive building objects (tools) to their execution handlers
+    ToolService.ts         Web search, code generation, sandboxed execution, and file persistence endpoints
     entities/
       Entity.ts            Abstract base — sprite, tile movement, name label, sleep visuals
       Player.ts            Keyboard-controlled entity (arrows / WASD)
@@ -42,6 +44,7 @@ vite/
   search-proxy.mjs         Vite plugin — proxies /api/search to Tavily Search API
   code-executor.mjs        Vite plugin — sandboxed JS execution via /api/execute (VM, 1s timeout)
   functions-io.mjs         Vite plugin — CRUD for NPC-created function records via /api/functions
+  utils.mjs                Shared streaming utility for Vite request parsing
 data/
   logs/                    Per-NPC chronological log and goal files (generated at runtime)
     chronological-{Name}.md

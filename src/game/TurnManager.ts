@@ -197,6 +197,11 @@ export class TurnManager {
         for (const dir of capped) {
             await this.waitIfConversationPaused();
 
+            if (dir.type === 'unknown') {
+                log.recordAction(`I tried to use an unknown command: "${dir.line}"`);
+                continue;
+            }
+
             if (dir.type === 'create_function') {
                 await this.functionBuilder.handleCreateFunction(npc, log, dir.description, dir.x, dir.y);
                 break;

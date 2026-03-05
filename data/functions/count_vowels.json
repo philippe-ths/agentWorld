@@ -1,0 +1,17 @@
+{
+  "name": "count_vowels",
+  "description": "Counts the total number of vowels (a, e, i, o, u) in a given sentence, case-insensitive",
+  "parameters": [
+    {
+      "name": "sentence",
+      "type": "string"
+    }
+  ],
+  "returnDescription": "Total count of vowels in the sentence",
+  "code": "let count = 0; const vowels = new Set(['a','e','i','o','u']); for (let i = 0; i < sentence.length; i++) { if (vowels.has(sentence[i].toLowerCase())) count++; } return count;",
+  "tile": {
+    "x": 22,
+    "y": 15
+  },
+  "creator": "Ada"
+}

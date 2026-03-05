@@ -18,16 +18,36 @@ export const MAX_REPATH_ATTEMPTS = 5;
 // ── LLM ──────────────────────────────────────────────────────
 
 // Model selection by intelligence tier (most → least intelligent)
-export const LLM_MODEL_OPUS = 'claude-opus-4-20250514';
-export const LLM_MODEL_SONNET = 'claude-sonnet-4-20250514';
-export const LLM_MODEL_HAIKU = 'claude-haiku-4-20250514';
+export const LLM_MODEL_OPUS = 'claude-opus-4-6';
+export const LLM_MODEL_SONNET = 'claude-sonnet-4-6';
+export const LLM_MODEL_HAIKU = 'claude-haiku-4-5-20251001';
 
 export const LLM_ENDPOINTS = {
     chat: '/api/chat',
     search: '/api/search',
     logs: '/api/logs',
     goals: '/api/goals',
+    execute: '/api/execute',
+    functions: '/api/functions',
 } as const;
+
+export interface FunctionParameterSpec {
+    name: string;
+    type: string;
+}
+
+export interface GeneratedFunctionSpec {
+    name: string;
+    description: string;
+    parameters: FunctionParameterSpec[];
+    returnDescription: string;
+    code: string;
+}
+
+export interface FunctionRecord extends GeneratedFunctionSpec {
+    tile: TilePos;
+    creator: string;
+}
 
 // ── Gameplay tuning ──────────────────────────────────────────
 
@@ -74,6 +94,15 @@ export const BUILDINGS: BuildingDef[] = [
         description: 'A terminal that can search the internet for information.',
         instructions: 'Use: use_tool(search_terminal, "your search query"). Returns a summary of search results (max 500 chars). Ends your turn immediately.',
         handler: 'search',
+    },
+    {
+        id: 'code_forge',
+        displayName: 'Code Forge',
+        tile: { x: 20, y: 15 },
+        symbol: 'C',
+        description: 'A forge where new executable function buildings can be created, updated, or deleted.',
+        instructions: 'create_function("description of what the function should do", x, y) | update_function("function_name", "description of what to change") | delete_function("function_name"). Each command ends your turn immediately.',
+        handler: 'code_forge',
     },
 ];
 

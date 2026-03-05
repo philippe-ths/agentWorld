@@ -10,17 +10,44 @@ function formatTranscript(history: ConversationMessage[]): string {
 const NONE_RE = /^none\(\s*\)$/m;
 
 function parseGoalFromResponse(text: string): Goal | null {
-    if (NONE_RE.test(text.trim())) return null;
+    const normalized = text.replace(/\r\n?/g, '\n').trim();
+    if (NONE_RE.test(normalized)) return null;
 
-    const source = text.match(/^Source:\s*(.+)$/m)?.[1]?.trim();
-    const goal = text.match(/^Goal:\s*(.+)$/m)?.[1]?.trim();
-    const plan = text.match(/^Plan:\s*(.+)$/m)?.[1]?.trim();
-    const success = text.match(/^Success:\s*(.+)$/m)?.[1]?.trim();
+    const source = extractField(normalized, 'Source', ['Goal', 'Plan', 'Success', 'Status']);
+    const goal = extractField(normalized, 'Goal', ['Plan', 'Success', 'Status']);
+    const plan = extractField(normalized, 'Plan', ['Success', 'Status']);
+    const success = extractField(normalized, 'Success');
+
     if (!source || !goal || !plan || !success) {
-        console.warn('%c[GoalExtractor] Could not parse goal from LLM response', 'color: #ffaa00', text);
+        const missing = [
+            source ? '' : 'Source',
+            goal ? '' : 'Goal',
+            plan ? '' : 'Plan',
+            success ? '' : 'Success',
+        ].filter(Boolean).join(', ');
+        console.warn(
+            `%c[GoalExtractor] Could not parse goal from LLM response (missing: ${missing || 'unknown'})`,
+            'color: #ffaa00',
+            normalized,
+        );
         return null;
     }
     return { source, goal, status: 'active', plan, success };
+}
+
+function extractField(text: string, label: string, nextLabels: string[] = []): string | null {
+    const escapedLabel = escapeRegex(label);
+    const next = nextLabels.length > 0
+        ? `(?=^(${nextLabels.map(escapeRegex).join('|')}):\\s*|$)`
+        : '$';
+    const re = new RegExp(`^${escapedLabel}:\\s*([\\s\\S]*?)${next}`, 'm');
+    const match = text.match(re);
+    const value = match?.[1]?.trim();
+    return value || null;
+}
+
+function escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export async function extractGoal(
@@ -34,10 +61,9 @@ export async function extractGoal(
     const transcript = formatTranscript(history);
 
     const messages: { role: string; content: string }[] = [];
-    if (currentGoals) {
-        messages.push({ role: 'user', content: `YOUR CURRENT GOALS:\n${currentGoals}` });
-        messages.push({ role: 'assistant', content: 'Understood.' });
-    }
+    const goalsText = currentGoals || 'You have no current goals.';
+    messages.push({ role: 'user', content: `YOUR CURRENT GOALS:\n${goalsText}` });
+    messages.push({ role: 'assistant', content: 'Understood.' });
     messages.push({ role: 'user', content: `WORLD STATE:\n${worldState}\n\nCONVERSATION:\n${transcript}` });
 
     let response: Response;
@@ -58,7 +84,7 @@ export async function extractGoal(
     }
 
     const data = await response.json();
-    const text: string = data.text;
+    const text: string = String(data.text ?? '').trim();
 
     console.group(`%c[GoalExtractor] ${npcName}`, 'color: #ff9f43; font-weight: bold');
     console.log(text);

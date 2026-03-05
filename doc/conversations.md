@@ -18,6 +18,7 @@ When an NPC includes `start_conversation_with(Name, message)` in its turn direct
 ```
 NPC A emits start_conversation_with(B, opening)
   → Turn system pauses
+  → If B is sleeping, B is woken automatically
   → A's speech bubble shows opening message
   → B receives conversation history via LLM (converse prompt)
   → B responds with say(message) or end_conversation()

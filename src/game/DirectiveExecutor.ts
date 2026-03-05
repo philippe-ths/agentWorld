@@ -98,9 +98,9 @@ export class DirectiveExecutor {
                     return false;
                 }
                 console.log(`%c[${npc.name}] use_tool(${dir.toolId}, "${dir.args}")`, 'color: #6bff6b');
-                log.recordAction(`I used ${building.displayName} to search: "${dir.args}"`);
+                log.recordAction(`I used ${building.displayName}: "${dir.args}"`);
                 const result = await building.execute(dir.args);
-                log.recordAction(`Search result: ${result}`);
+                log.recordAction(`Result: ${result}`);
                 return true;
             }
             case 'sleep':

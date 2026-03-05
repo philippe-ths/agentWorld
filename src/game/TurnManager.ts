@@ -12,8 +12,17 @@ import { ToolRegistry } from './ToolRegistry';
 import { DirectiveExecutor } from './DirectiveExecutor';
 import {
     SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN,
-    NPC_TURN_DELAY, FONT, SLEEP_TURNS,
+    NPC_TURN_DELAY, FONT, SLEEP_TURNS, FunctionRecord,
 } from './GameConfig';
+import {
+    deleteFunctionRecord,
+    executeFunction,
+    generateFunctionSpec,
+    loadFunctionRecord,
+    saveFunctionRecord,
+    testFunctionSpec,
+} from './ToolService';
+import { isGrassTile, isSpawnTile, isWithinMapBounds } from './MapData';
 
 type TurnState = 'idle' | 'npc-turn' | 'paused';
 
@@ -100,15 +109,16 @@ export class TurnManager {
 
     private async runLoop() {
         while (true) {
-            await this.waitIfPaused();
+            await this.waitIfAnyPause();
             this.turnNumber++;
             for (const npc of this.npcs) {
-                await this.waitIfPaused();
+                await this.waitIfAnyPause();
                 this.state = 'npc-turn';
                 this.activeNpc = npc;
                 this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name}'s turn`);
 
                 await this.runNpcTurn(npc);
+                await this.waitIfAnyPause();
                 await this.delay(NPC_TURN_DELAY);
             }
 
@@ -120,6 +130,10 @@ export class TurnManager {
     }
 
     private async runNpcTurn(npc: NPC) {
+        // Wait if a player conversation is active — ensures this NPC's entire
+        // turn is deferred so it won't make decisions without fresh memory.
+        await this.waitIfConversationPaused();
+
         // Sleep check — skip LLM call if NPC is sleeping
         const wakeAt = this.sleepUntil.get(npc.name);
         if (wakeAt !== undefined && this.turnNumber < wakeAt) {
@@ -184,6 +198,22 @@ export class TurnManager {
 
         for (const dir of capped) {
             await this.waitIfConversationPaused();
+
+            if (dir.type === 'create_function') {
+                await this.handleCreateFunction(npc, log, dir.description, dir.x, dir.y);
+                break;
+            }
+
+            if (dir.type === 'update_function') {
+                await this.handleUpdateFunction(npc, log, dir.functionName, dir.changeDescription);
+                break;
+            }
+
+            if (dir.type === 'delete_function') {
+                await this.handleDeleteFunction(npc, log, dir.functionName);
+                break;
+            }
+
             const shouldStop = await this.executor.executeAction(npc, dir, log, this.turnNumber);
             if (shouldStop) break;
         }
@@ -230,6 +260,12 @@ export class TurnManager {
         return new Promise(resolve => {
             this.pauseResolve = resolve;
         });
+    }
+
+    /** Block until both manual pause and conversation pause are released. */
+    private async waitIfAnyPause(): Promise<void> {
+        await this.waitIfPaused();
+        await this.waitIfConversationPaused();
     }
 
     pauseForConversation(): void {
@@ -282,4 +318,188 @@ export class TurnManager {
     getLlm(): LLMService {
         return this.llm;
     }
+
+    private async handleCreateFunction(
+        npc: NPC,
+        log: ChronologicalLog,
+        description: string,
+        x: number,
+        y: number,
+    ): Promise<void> {
+        if (!this.toolRegistry.isAdjacentTo(npc.tilePos, 'code_forge')) {
+            log.recordAction('I tried to use Code Forge but I am not adjacent to it');
+            return;
+        }
+
+        const placementError = this.validateFunctionPlacement(x, y);
+        if (placementError) {
+            log.recordAction(`I used Code Forge to create function but it failed: ${placementError}`);
+            return;
+        }
+
+        try {
+            const generated = await generateFunctionSpec(description);
+            if (this.toolRegistry.getById(generated.name)) {
+                log.recordAction(`I used Code Forge to create function but it failed: Function \"${generated.name}\" already exists`);
+                return;
+            }
+
+            const dryRun = await testFunctionSpec(generated);
+            if (!dryRun.ok) {
+                log.recordAction(`I used Code Forge to create function but it failed: ${dryRun.result}`);
+                return;
+            }
+
+            const record: FunctionRecord = {
+                ...generated,
+                tile: { x, y },
+                creator: npc.name,
+            };
+
+            await saveFunctionRecord(record);
+            this.registerFunctionBuilding(record);
+
+            log.recordAction(`I used Code Forge to create function \"${record.name}\": ${record.description}`);
+            log.recordAction(`Function building placed at (${x},${y})`);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.recordAction(`I used Code Forge to create function but it failed: ${msg}`);
+        }
+    }
+
+    private async handleUpdateFunction(
+        npc: NPC,
+        log: ChronologicalLog,
+        functionName: string,
+        changeDescription: string,
+    ): Promise<void> {
+        if (!this.toolRegistry.isAdjacentTo(npc.tilePos, 'code_forge')) {
+            log.recordAction('I tried to use Code Forge but I am not adjacent to it');
+            return;
+        }
+
+        try {
+            const existing = await loadFunctionRecord(functionName);
+            if (!existing) {
+                log.recordAction(`I used Code Forge to update function but it failed: Function \"${functionName}\" does not exist`);
+                return;
+            }
+
+            const updated = await generateFunctionSpec(
+                existing.description,
+                {
+                    name: existing.name,
+                    code: existing.code,
+                    description: existing.description,
+                },
+                changeDescription,
+            );
+
+            // Updates keep the same function identity for stable building/tool ids.
+            const updatedRecord: FunctionRecord = {
+                ...updated,
+                name: existing.name,
+                tile: existing.tile,
+                creator: existing.creator,
+            };
+
+            const dryRun = await testFunctionSpec(updatedRecord);
+            if (!dryRun.ok) {
+                log.recordAction(`I used Code Forge to update function but it failed: ${dryRun.result}`);
+                return;
+            }
+
+            await saveFunctionRecord(updatedRecord);
+            this.registerFunctionBuilding(updatedRecord);
+            log.recordAction(`I used Code Forge to update function \"${updatedRecord.name}\": ${changeDescription}`);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.recordAction(`I used Code Forge to update function but it failed: ${msg}`);
+        }
+    }
+
+    private async handleDeleteFunction(
+        npc: NPC,
+        log: ChronologicalLog,
+        functionName: string,
+    ): Promise<void> {
+        if (!this.toolRegistry.isAdjacentTo(npc.tilePos, 'code_forge')) {
+            log.recordAction('I tried to use Code Forge but I am not adjacent to it');
+            return;
+        }
+
+        const existing = this.toolRegistry.getById(functionName);
+        if (!existing) {
+            log.recordAction(`I used Code Forge to delete function but it failed: Function \"${functionName}\" does not exist`);
+            return;
+        }
+
+        try {
+            await deleteFunctionRecord(functionName);
+            this.toolRegistry.unregister(functionName);
+            log.recordAction(`I used Code Forge to delete function \"${functionName}\"`);
+            log.recordAction(`Building removed from (${existing.tile.x},${existing.tile.y})`);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.recordAction(`I used Code Forge to delete function but it failed: ${msg}`);
+        }
+    }
+
+    private validateFunctionPlacement(x: number, y: number): string | null {
+        if (!isWithinMapBounds(x, y)) {
+            return `Invalid placement (${x},${y}): outside map bounds`;
+        }
+        if (!isGrassTile(x, y)) {
+            return `Invalid placement (${x},${y}): must be a grass tile`;
+        }
+        if (this.toolRegistry.isBuildingAt(x, y)) {
+            return `Invalid placement (${x},${y}): tile already has a building`;
+        }
+        if (isSpawnTile(x, y)) {
+            return `Invalid placement (${x},${y}): tile is a spawn point`;
+        }
+
+        // Require at least one empty tile between buildings (block orthogonal + diagonal adjacency).
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                if (dx === 0 && dy === 0) continue;
+                if (this.toolRegistry.isBuildingAt(x + dx, y + dy)) {
+                    return `Invalid placement (${x},${y}): must be at least one tile away from existing buildings`;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private registerFunctionBuilding(record: FunctionRecord): void {
+        const parameterNames = record.parameters.map(p => p.name);
+
+        this.toolRegistry.registerFunctionBuilding(record, async (rawArgs: string) => {
+            const parsedArgs = parseToolArgs(rawArgs);
+            const result = await executeFunction(parameterNames, record.code, parsedArgs);
+            return result.ok ? result.result : `Error: ${result.result}`;
+        });
+    }
+}
+
+function parseToolArgs(rawArgs: string): unknown[] {
+    if (!rawArgs.trim()) return [];
+    return rawArgs.split(',').map(value => parseSingleArg(value.trim()));
+}
+
+function parseSingleArg(value: string): unknown {
+    if (!value.length) return '';
+    if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (value === 'null') return null;
+    if ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']'))) {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return value;
+        }
+    }
+    return value;
 }

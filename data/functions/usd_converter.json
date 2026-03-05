@@ -1,0 +1,17 @@
+{
+  "name": "usd_converter",
+  "description": "Converts a USD amount to GBP, EUR, and JPY using fixed exchange rates",
+  "parameters": [
+    {
+      "name": "usd_amount",
+      "type": "number"
+    }
+  ],
+  "returnDescription": "An object containing the converted amounts in GBP, EUR, and JPY",
+  "code": "const amount = parseFloat(usd_amount); if (isNaN(amount)) { return { error: 'Invalid USD amount provided' }; } const gbp = (amount * 0.79).toFixed(2); const eur = (amount * 0.93).toFixed(2); const jpy = (amount * 156.01).toFixed(2); return { USD: `$${amount.toFixed(2)}`, GBP: `£${gbp}`, EUR: `€${eur}`, JPY: `¥${jpy}` };",
+  "tile": {
+    "x": 22,
+    "y": 17
+  },
+  "creator": "Bjorn"
+}

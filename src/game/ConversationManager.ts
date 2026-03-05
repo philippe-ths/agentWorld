@@ -7,6 +7,7 @@ import { ChronologicalLog } from './ChronologicalLog';
 import { GoalManager } from './GoalManager';
 import { extractGoal } from './GoalExtractor';
 import { buildWorldState } from './WorldState';
+import { ToolRegistry } from './ToolRegistry';
 import { LOG_CHAR_BUDGET, MAX_EXCHANGES, SPEECH_BUBBLE_DURATION } from './GameConfig';
 
 export interface ConversationSession {
@@ -30,6 +31,7 @@ export class ConversationManager {
     private logs: Map<string, ChronologicalLog>;
     private goals: Map<string, GoalManager>;
     private callbacks: ConversationCallbacks;
+    private toolRegistry: ToolRegistry;
     private activeSession: ConversationSession | null = null;
 
     /** Called when an NPC becomes a conversation target (wakes sleeping NPCs). */
@@ -45,12 +47,14 @@ export class ConversationManager {
         logs: Map<string, ChronologicalLog>,
         goals: Map<string, GoalManager>,
         callbacks: ConversationCallbacks,
+        toolRegistry: ToolRegistry,
     ) {
         this.entityManager = entityManager;
         this.llm = llm;
         this.logs = logs;
         this.goals = goals;
         this.callbacks = callbacks;
+        this.toolRegistry = toolRegistry;
     }
 
     isInConversation(): boolean {
@@ -98,7 +102,7 @@ export class ConversationManager {
 
         // Show speech bubble and simultaneously call target's LLM
         const entities = this.entityManager.getEntities();
-        const targetWorldState = buildWorldState(target, entities);
+        const targetWorldState = buildWorldState(target, entities, this.toolRegistry);
         const targetMemory = this.logs.get(target.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
 
         const [, targetResponse] = await Promise.all([
@@ -121,7 +125,7 @@ export class ConversationManager {
         // Alternate back and forth
         while (exchangeCount < MAX_EXCHANGES) {
             // Initiator's turn
-            const initiatorWorldState = buildWorldState(initiator, entities);
+            const initiatorWorldState = buildWorldState(initiator, entities, this.toolRegistry);
             const initiatorMemory = this.logs.get(initiator.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
             const initiatorResponse = await this.llm.converse(
                 initiator.name, initiatorWorldState, initiatorMemory, this.activeSession.history,
@@ -274,7 +278,7 @@ export class ConversationManager {
 
     private async sendPlayerMessageToNpc(npc: NPC): Promise<ConversationResponse> {
         const entities = this.entityManager.getEntities();
-        const worldState = buildWorldState(npc, entities);
+        const worldState = buildWorldState(npc, entities, this.toolRegistry);
         const memory = this.logs.get(npc.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
         return this.llm.converse(npc.name, worldState, memory, this.activeSession!.history);
     }
@@ -307,7 +311,7 @@ export class ConversationManager {
             const npcEntity = session.initiator instanceof Player ? session.target : session.initiator;
             const goalMgr = this.goals.get(npcName);
             if (goalMgr) {
-                const worldState = buildWorldState(npcEntity, entities);
+                const worldState = buildWorldState(npcEntity, entities, this.toolRegistry);
                 await extractGoal(npcName, session.history, worldState, goalMgr);
             }
         } else {
@@ -324,11 +328,11 @@ export class ConversationManager {
             const initiatorGoals = this.goals.get(session.initiator.name);
             const targetGoals = this.goals.get(session.target.name);
             if (initiatorGoals) {
-                const ws = buildWorldState(session.initiator, entities);
+                const ws = buildWorldState(session.initiator, entities, this.toolRegistry);
                 await extractGoal(session.initiator.name, session.history, ws, initiatorGoals);
             }
             if (targetGoals) {
-                const ws = buildWorldState(session.target, entities);
+                const ws = buildWorldState(session.target, entities, this.toolRegistry);
                 await extractGoal(session.target.name, session.history, ws, targetGoals);
             }
         }

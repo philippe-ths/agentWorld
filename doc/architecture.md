@@ -7,37 +7,47 @@ src/
   main.ts                  Entry point — creates the Phaser game
   game/
     main.ts                Game config & StartGame()
-    prompts.ts             Centralized LLM config — PromptConfig interface, per-prompt model/tokens/system, gameplay tuning
+    GameConfig.ts          Constants, model names, NPC/building definitions, interfaces
+    prompts.ts             LLM prompt configs — PromptConfig interface, per-prompt model/tokens/system
     MapData.ts             Procedural 30x30 map (seeded PRNG, grass + water ponds)
     Pathfinder.ts          A* pathfinding on the tile grid
     WorldState.ts          Serializes game state into compact text for LLM consumption
     LLMService.ts          Client-side LLM caller — sends decision & conversation prompts, logs I/O
     DirectiveParser.ts     Parses LLM text responses into typed directive objects
-    TurnManager.ts         Orchestrates NPC turn loop, executes directives, pause/resume
+    DirectiveExecutor.ts   Executes parsed directives — movement, tools, goals, sleep
+    TurnManager.ts         Orchestrates NPC turn loop, sleep tracking, pause/resume
     ChronologicalLog.ts    Per-NPC memory — records observations/actions, summarizes old turns
     ConversationManager.ts Manages NPC-NPC and player-NPC conversations via LLM
     GoalManager.ts         Per-NPC goal persistence — active/pending goals, promotion, serialization
     GoalExtractor.ts       Extracts new goals from conversation transcripts via LLM
+    ToolBuilding.ts        Interface for interactive building objects (tools)
+    ToolRegistry.ts        Registry for all tool buildings — lookup by id, position, adjacency
+    ToolService.ts         Web search, code generation, sandboxed execution, function persistence
     entities/
-      Entity.ts            Abstract base — sprite, tile movement, name label, depth sort
+      Entity.ts            Abstract base — sprite, tile movement, name label, sleep visuals
       Player.ts            Keyboard-controlled entity (arrows / WASD)
-      NPC.ts               LLM-driven entity (tinted sprite, async walk-to-target)
-      EntityManager.ts     Holds all entities, runs updates, walkability check
+      NPC.ts               LLM-driven entity (tinted sprite, async walk-to-target, optimistic pathfinding)
+      EntityManager.ts     Holds all entities, runs updates, walkability + terrain checks
     scenes/
-      Preloader.ts         Loads sprite sheet, generates tile textures, then starts GameScene
-      GameScene.ts         Builds tilemap, spawns player + 3 NPCs, sets up camera & TurnManager
+      Preloader.ts         Loads sprite sheet, generates tile & building textures, then starts GameScene
+      GameScene.ts         Builds tilemap, spawns entities, loads persisted functions, sets up systems
     ui/
       DialogueBox.ts       UI overlay for player-NPC conversation input
       SpeechBubble.ts      Floating speech bubble above speaking entities
 vite/
-  config.dev.mjs           Dev config — includes Anthropic proxy & log I/O plugins
-  config.prod.mjs          Production build config
-  anthropic-proxy.mjs      Vite server plugin — proxies /api/chat to Anthropic API (all LLM calls)
-  log-io.mjs               Vite server plugin — reads/writes per-NPC log & goal .md files
+  config.dev.mjs           Dev config — includes all server plugins
+  config.prod.mjs          Production build config (static only, no API plugins)
+  anthropic-proxy.mjs      Vite plugin — proxies /api/chat to Anthropic API with fallback model chain
+  log-io.mjs               Vite plugin — reads/writes per-NPC log & goal .md files
+  search-proxy.mjs         Vite plugin — proxies /api/search to Tavily Search API
+  code-executor.mjs        Vite plugin — sandboxed JS execution via /api/execute (VM, 1s timeout)
+  functions-io.mjs         Vite plugin — CRUD for NPC-created function records via /api/functions
 data/
   logs/                    Per-NPC chronological log and goal files (generated at runtime)
     chronological-{Name}.md
     goals-{Name}.md
+  functions/               NPC-created function records (JSON, generated at runtime)
+    {function_name}.json
 ```
 
 ## Scene Flow
@@ -50,32 +60,36 @@ Preloader loads the `player.png` sprite sheet and generates isometric diamond te
 
 ## Entities
 
-`Entity` is the abstract base class. It creates a sprite at a tile position, handles animated tile-to-tile movement via tweens, and displays a name label.
+`Entity` is the abstract base class. It creates a sprite at a tile position, handles animated tile-to-tile movement via tweens, displays a name label, and supports a sleeping visual state (rotated sprite + "zzZ" label).
 
 - **Player** — reads keyboard input each frame, calls `moveTo()` on key press. Moves freely at any time (not part of the turn system).
-- **NPC** — driven by LLM via `TurnManager`. Has `walkToAsync()` for full-path movement and `stepTowardAsync()` for single-step pathfinding.
+- **NPC** — driven by LLM via `TurnManager`. Has `walkToAsync()` for full-path movement with optimistic pathfinding (ignores entities on first attempt, re-paths up to 5 times if blocked). Returns a `WalkResult` with `reached` and optional `reason` (`no_path` or `repath_limit`). A `conversationPauseGate` pauses movement mid-walk during active conversations.
 
-`EntityManager` stores all entities, runs their `update()` each frame, and provides the `isWalkable()` check (bounds + water + occupied tiles).
+`EntityManager` stores all entities, runs their `update()` each frame, and provides two walkability checks:
+- `isWalkable()` — bounds + water + buildings + occupied tiles
+- `isTerrainWalkable()` — bounds + water + buildings only (ignores entities, used for optimistic NPC pathfinding)
 
 ## Map
 
-Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, seed 42) to place 3-5 organic water ponds on a 30x30 grass field. Spawn areas for the player and all NPCs are guaranteed clear.
+Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, seed 42) to place 3-5 organic water ponds on a 30x30 grass field. Spawn areas for the player, all NPCs, and building neighborhoods are guaranteed clear.
 
 ## Turn System
 
 `TurnManager` runs an async loop that cycles through NPCs sequentially (Ada → Bjorn → Cora). For each NPC's turn:
 
-1. Load the NPC's chronological log and goals from disk
-2. Record observations to the log (position, visible entities)
-3. Build world state text via `WorldState.buildWorldState()`
-4. Build memory content from the log via `ChronologicalLog.buildPromptContent()`
-5. Build goal content via `GoalManager.buildPromptContent()`
-6. Send world state + memory + goals to Claude via `LLMService.decide()`
-7. Parse response into directives via `DirectiveParser.parseDirectives()`
-8. Execute up to 3 action directives — each runs to completion before the next; record each action to the log. Goal directives (`complete_goal`, `abandon_goal`, `switch_goal`) don't count toward the limit.
-9. Save the log and goals to disk
-10. Trigger summarization of old entries if enough have accumulated
-11. Wait 5 seconds before the next NPC's turn
+1. Check sleep status — if sleeping, skip the LLM call and decrement remaining sleep turns
+2. Load the NPC's chronological log and goals from disk
+3. Record observations to the log (position, visible entities)
+4. Build world state text via `WorldState.buildWorldState()`
+5. Build memory content from the log via `ChronologicalLog.buildPromptContent()`
+6. Build goal content via `GoalManager.buildPromptContent()`
+7. Send world state + memory + goals to Claude via `LLMService.decide()`
+8. Parse response into directives via `DirectiveParser.parseDirectives()`
+9. Execute goal directives instantly (don't count toward budget), then up to 3 action directives via `DirectiveExecutor`. Each runs to completion before the next. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
+10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `TurnManager`
+11. Save the log and goals to disk
+12. Trigger summarization of old entries if enough have accumulated
+13. Wait 5 seconds before the next NPC's turn
 
 The player is **not** part of the turn system and can move at any time.
 
@@ -85,40 +99,53 @@ Press **P** to pause/resume the NPC turn loop.
 
 ### Configuration
 
-All LLM parameters are centralized in `src/game/prompts.ts`. Each of the four LLM calls has its own `PromptConfig` object containing `model`, `maxTokens`, and `buildSystem()`. Gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`) also live here.
+LLM prompt configs live in `src/game/prompts.ts`. Each of the five LLM calls has its own `PromptConfig` object containing `model`, `maxTokens`, and `buildSystem()`. Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`) and gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`) live in `src/game/GameConfig.ts`.
 
 ### Server Side
 
-`vite/anthropic-proxy.mjs` is a Vite server plugin that adds a single `POST /api/chat` endpoint used by all four LLM calls. It:
-- Loads `ANTHROPIC_API_KEY` from `.env` at startup
-- Accepts `model`, `system`, `messages`, and `max_tokens` from the client
-- Proxies requests to the Anthropic Messages API
-- Keeps the API key server-side (never sent to the browser)
+Vite server plugins (dev only) expose the following API endpoints:
+
+| Endpoint | Plugin | Purpose |
+|----------|--------|---------|
+| `POST /api/chat` | `anthropic-proxy.mjs` | Proxy to Anthropic Messages API (all 5 LLM calls). Auto-retries with fallback models on 404. |
+| `POST /api/search` | `search-proxy.mjs` | Proxy to Tavily Search API for web search queries |
+| `POST /api/execute` | `code-executor.mjs` | Sandboxed JS execution in VM context (1s timeout) |
+| `GET/POST /api/logs/:name` | `log-io.mjs` | Per-NPC chronological log file I/O |
+| `GET/POST /api/goals/:name` | `log-io.mjs` | Per-NPC goal file I/O |
+| `GET/POST/DELETE /api/functions[/:name]` | `functions-io.mjs` | CRUD for NPC-created function records |
+
+All API keys (`ANTHROPIC_API_KEY`, `TAVILY_API_KEY`) are loaded from `.env` and kept server-side.
 
 ### Client Side
 
-Four LLM calls go through `/api/chat`, each with its own prompt config from `prompts.ts`:
+Five LLM calls go through `/api/chat`, each with its own prompt config from `prompts.ts`:
 
 1. **Decision** (`LLMService.decide()`) — NPC action selection. Context: memory, goals, world state.
 2. **Conversation** (`LLMService.converse()`) — in-character dialogue responses. Context: memory, world state, conversation history.
 3. **Summarization** (`ChronologicalLog.maybeSummarize()`) — compresses old memory entries. Context: oldest chronological log entries.
 4. **Goal extraction** (`GoalExtractor.extractGoal()`) — detects new goals from conversation transcripts. Context: current goals, world state, conversation transcript.
+5. **Code generation** (`ToolService.generateFunctionSpec()`) — generates JS function implementations. Context: description, optional existing code + change description.
 
 ### Directives
 
 `DirectiveParser` extracts structured commands from the LLM text response:
 
-| Directive | Description |
-|-----------|-------------|
-| `move_to(x,y)` | Walk to a tile coordinate |
-| `wait()` | Do nothing |
-| `start_conversation_with(Name, message)` | Initiate a conversation with an adjacent entity |
-| `end_conversation()` | End the current conversation |
-| `complete_goal()` | Mark the active goal as done (doesn't count toward 3-command limit) |
-| `abandon_goal()` | Give up on the active goal (doesn't count toward 3-command limit) |
-| `switch_goal()` | Abandon active goal and promote pending goal (doesn't count toward 3-command limit) |
+| Directive | Description | Budget |
+|-----------|-------------|:------:|
+| `move_to(x,y)` | Walk to a tile coordinate | Yes |
+| `wait()` | Do nothing | Yes |
+| `start_conversation_with(Name, message)` | Initiate a conversation with an adjacent entity (ends turn) | Yes |
+| `end_conversation()` | End the current conversation | Yes |
+| `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes |
+| `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes |
+| `create_function("desc", x, y)` | Create a new function building at Code Forge (ends turn) | Yes |
+| `update_function("name", "change")` | Update an existing function at Code Forge (ends turn) | Yes |
+| `delete_function("name")` | Delete a function building at Code Forge (ends turn) | Yes |
+| `complete_goal()` | Mark the active goal as done | No |
+| `abandon_goal()` | Give up on the active goal | No |
+| `switch_goal()` | Abandon active goal and promote pending goal | No |
 
-Unknown lines are logged as warnings.
+Execution is handled by `DirectiveExecutor`. Unknown lines are logged as warnings.
 
 ### Error Handling
 
@@ -179,13 +206,51 @@ YOU: Ada at (15,10)
   Bjorn at (25,20)
   Cora at (10,25)
 
+BUILDINGS:
+  Search Terminal at (15,15) — A terminal that can search the internet
+  Code Forge at (20,15) — A forge where new function buildings can be created
+
 [30 rows of 30 characters — one per tile]
-. = grass (walkable), ~ = water (blocked), @ = you, P = player (blocked), A/B/C = NPCs (blocked)
+. = grass, ~ = water, @ = you, P/A/B/C = entities, S/C = buildings
 
 ACTIONS: move_to(x,y) | wait()
 ```
 
-Entities are overlaid on the map grid using single characters. The format is ~950 characters total for a 30x30 map.
+Entities and buildings are overlaid on the map grid using single characters. When an NPC is adjacent to a tool building, that building's usage instructions are appended to the world state.
+
+## Buildings & Tools
+
+The game has interactive building objects that NPCs can use by moving adjacent and issuing directives. Buildings are defined in `GameConfig.ts` and managed by `ToolRegistry`.
+
+### Built-in Buildings
+
+| Building | Position | Symbol | Description |
+|----------|----------|--------|-------------|
+| Search Terminal | (15,15) | `S` | Searches the web via Tavily API. Use: `use_tool(search_terminal, "query")` |
+| Code Forge | (20,15) | `C` | Creates/updates/deletes executable function buildings. Use: `create_function(...)`, `update_function(...)`, `delete_function(...)` |
+
+### NPC-Created Function Buildings
+
+NPCs can create new function buildings at the Code Forge. The flow:
+1. NPC moves adjacent to Code Forge and issues `create_function("description", x, y)`
+2. `ToolService.generateFunctionSpec()` calls the `CODE_GENERATION` LLM prompt to generate a JS implementation
+3. The function is tested in the sandbox (`/api/execute`) before saving
+4. On success, a `FunctionRecord` is persisted to `data/functions/{name}.json` and registered as a new tool building on the map
+5. Other NPCs can then move adjacent and call it via `use_tool(function_name, "args")`
+
+Function buildings can also be updated (`update_function`) or deleted (`delete_function`).
+
+### Tool System
+
+- `ToolBuilding` — interface: `id`, `displayName`, `tile`, `symbol`, `description`, `instructions`, `execute(args)`
+- `ToolRegistry` — registers/unregisters buildings, lookup by id or position, adjacency checks
+- `ToolService` — web search (`/api/search`), code generation (`/api/chat`), sandboxed execution (`/api/execute`), function CRUD (`/api/functions`)
+
+## Sleep
+
+NPCs can enter a low-power sleep mode via the `sleep()` directive. Sleep lasts for `SLEEP_TURNS` (10) turns during which the NPC skips the LLM call entirely. Visual feedback: the sprite rotates 90° and a "zzZ" label appears.
+
+Sleeping NPCs are automatically woken if another entity starts a conversation with them.
 
 ## NPC Memory
 
@@ -212,11 +277,11 @@ Ada explored the northeast quadrant, moving from (15,10) to (22,16). She saw Pla
 
 ### Summarization
 
-Every 5 turns (configurable via `SUMMARIZE_EVERY_N_TURNS` in `prompts.ts`), the oldest unsummarized entries are compressed into a paragraph via the `/api/chat` endpoint using the `SUMMARIZE` prompt config. The most recent 5 turns always stay in full detail. This gives NPCs detailed recent memory and increasingly compressed older memory.
+Every 5 turns (configurable via `SUMMARIZE_EVERY_N_TURNS` in `GameConfig.ts`), the oldest unsummarized entries are compressed into a paragraph via the `/api/chat` endpoint using the `SUMMARIZE` prompt config. The most recent 5 turns always stay in full detail. This gives NPCs detailed recent memory and increasingly compressed older memory.
 
 ### Token Budget
 
-The log content injected into the prompt is capped at 4000 characters (`LOG_CHAR_BUDGET` in `prompts.ts`). If the total exceeds the budget, the oldest summaries are dropped first, then the oldest full entries.
+The log content injected into the prompt is capped at 4000 characters (`LOG_CHAR_BUDGET` in `GameConfig.ts`). If the total exceeds the budget, the oldest summaries are dropped first, then the oldest full entries.
 
 ### Persistence
 

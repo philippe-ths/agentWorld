@@ -22,6 +22,18 @@ try {
  * Reads ANTHROPIC_API_KEY from .env file.
  */
 export function anthropicProxy() {
+    const fallbackModels = [
+        'claude-sonnet-4-6',
+        'claude-sonnet-4-5-20250929',
+        'claude-opus-4-6',
+    ];
+
+    function shouldRetryWithFallback(err) {
+        const status = Number(err?.status || 0);
+        const message = String(err?.message || '');
+        return status === 404 || message.includes('not_found_error') || message.includes('model:');
+    }
+
     return {
         name: 'anthropic-proxy',
         configureServer(server) {
@@ -62,12 +74,49 @@ export function anthropicProxy() {
 
                 try {
                     const client = new Anthropic({ apiKey });
-                    const response = await client.messages.create({
-                        model: model || 'claude-sonnet-4-20250514',
-                        max_tokens: Number(max_tokens) || 256,
-                        system,
-                        messages,
-                    });
+                    let requestedModel = model || fallbackModels[0];
+                    let response;
+
+                    try {
+                        response = await client.messages.create({
+                            model: requestedModel,
+                            max_tokens: Number(max_tokens) || 256,
+                            system,
+                            messages,
+                        });
+                    } catch (err) {
+                        if (shouldRetryWithFallback(err)) {
+                            let recovered = false;
+
+                            for (const fallbackModel of fallbackModels) {
+                                if (fallbackModel === requestedModel) continue;
+                                try {
+                                    console.warn(
+                                        `[anthropic-proxy] Model \"${requestedModel}\" unavailable, retrying with \"${fallbackModel}\"`,
+                                    );
+                                    requestedModel = fallbackModel;
+                                    response = await client.messages.create({
+                                        model: requestedModel,
+                                        max_tokens: Number(max_tokens) || 256,
+                                        system,
+                                        messages,
+                                    });
+                                    recovered = true;
+                                    break;
+                                } catch (fallbackErr) {
+                                    if (!shouldRetryWithFallback(fallbackErr)) {
+                                        throw fallbackErr;
+                                    }
+                                }
+                            }
+
+                            if (!recovered) {
+                                throw err;
+                            }
+                        } else {
+                            throw err;
+                        }
+                    }
 
                     const text = response.content
                         .filter(b => b.type === 'text')

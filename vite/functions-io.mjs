@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parseJsonBody } from './utils.mjs';
 
 const FUNCTION_NAME_RE = /^[a-z_][a-z0-9_]*$/;
 
@@ -50,7 +51,7 @@ export function functionsIO() {
         res.end(JSON.stringify({ functions }));
     }
 
-    function itemHandler(req, res, next) {
+    async function itemHandler(req, res, next) {
         const match = req.url?.match(/^\/api\/functions\/([^/?]+)$/);
         if (!match) return next();
 
@@ -79,36 +80,32 @@ export function functionsIO() {
         }
 
         if (req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                let parsed;
-                try {
-                    parsed = JSON.parse(body);
-                } catch {
-                    res.statusCode = 400;
-                    res.end(JSON.stringify({ error: 'Invalid JSON' }));
-                    return;
-                }
+            let parsed;
+            try {
+                parsed = await parseJsonBody(req);
+            } catch {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Invalid JSON' }));
+                return;
+            }
 
-                if (!isValidRecordShape(parsed)) {
-                    res.statusCode = 400;
-                    res.end(JSON.stringify({ error: 'Invalid function record payload' }));
-                    return;
-                }
+            if (!isValidRecordShape(parsed)) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Invalid function record payload' }));
+                return;
+            }
 
-                if (parsed.name !== functionName) {
-                    res.statusCode = 400;
-                    res.end(JSON.stringify({ error: 'Name mismatch between URL and payload' }));
-                    return;
-                }
+            if (parsed.name !== functionName) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Name mismatch between URL and payload' }));
+                return;
+            }
 
-                mkdirSync(functionsDir, { recursive: true });
-                writeFileSync(recordPath, JSON.stringify(parsed, null, 2), 'utf-8');
+            mkdirSync(functionsDir, { recursive: true });
+            writeFileSync(recordPath, JSON.stringify(parsed, null, 2), 'utf-8');
 
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ ok: true }));
-            });
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: true }));
             return;
         }
 

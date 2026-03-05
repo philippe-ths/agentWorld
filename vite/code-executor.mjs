@@ -1,4 +1,5 @@
 import vm from 'node:vm';
+import { parseJsonBody } from './utils.mjs';
 
 const TIMEOUT_MS = 1000;
 
@@ -58,14 +59,9 @@ export function codeExecutor() {
                     return;
                 }
 
-                let body = '';
-                for await (const chunk of req) {
-                    body += chunk;
-                }
-
                 let parsed;
                 try {
-                    parsed = JSON.parse(body);
+                    parsed = await parseJsonBody(req);
                 } catch {
                     res.statusCode = 400;
                     res.end(JSON.stringify({ error: 'Invalid JSON' }));

@@ -175,6 +175,7 @@ Goal directives (`complete_goal`, `abandon_goal`, `switch_goal`) let NPCs manage
 - The on-screen turn label shows the error message
 - The NPC falls back to `wait()` so the game loop continues
 - Unknown directives from the LLM are logged as yellow warnings
+- **Core Principle**: All execution outcomes, particularly parse errors and tool/sandbox fail states, MUST be explicitly fed back into the NPC's Chronological Log (`log.recordAction(error)`). If errors are only console-logged or thrown uncaught, the NPC loses feedback, repeats the exact same failing command on the next turn, and gets stuck in a loop.
 
 ## Debugging
 

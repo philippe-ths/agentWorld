@@ -16,15 +16,21 @@ src/
     DirectiveParser.ts     Parses LLM text responses into typed directive objects
     DirectiveExecutor.ts   Executes parsed directives — movement, tools, goals, sleep
     TurnManager.ts         Orchestrates NPC turn loop, sleep tracking, pause/resume
-    FunctionBuilderService.ts Handles tool creation validations and UI flows specific to LLM-generated code functions
-    validation.ts          JSON and object validation schemas for functions and network payloads
+    FunctionBuilderService.ts Handles Code Forge validation, rejection feedback, and registration for LLM-generated code functions
+    FunctionCapability.ts  Detects requests or generated code that need unsupported sandbox capabilities
+    PersistedFunctionAudit.ts Partitions saved functions into supported vs unsupported records for startup cleanup
+    validation.ts          JSON validation for generated function specs, structured rejections, and persisted records
     ChronologicalLog.ts    Per-NPC memory — records observations/actions, summarizes old turns
     ConversationManager.ts Manages NPC-NPC and player-NPC conversations via LLM
     GoalManager.ts         Per-NPC goal persistence — active/pending goals, promotion, serialization
     GoalExtractor.ts       Extracts new goals from conversation transcripts via LLM
     ToolBuilding.ts        Interface for interactive building objects (tools)
     ToolRegistry.ts        Registry mapping interactive building objects (tools) to their execution handlers
-    ToolService.ts         Web search, code generation, sandboxed execution, and file persistence endpoints
+    ToolService.ts         Web search, structured code generation, sandboxed execution, and function persistence endpoints
+    FunctionCapability.test.ts Capability-screening coverage for unsupported requests and code
+    FunctionBuilderService.test.ts Code Forge rejection-path coverage for create/update flows
+    PersistedFunctionAudit.test.ts Startup cleanup coverage for unsupported saved functions
+    validation.test.ts     Coverage for valid function specs and structured rejections
     entities/
       Entity.ts            Abstract base — sprite, tile movement, name label, sleep visuals
       Player.ts            Keyboard-controlled entity (arrows / WASD)
@@ -32,7 +38,7 @@ src/
       EntityManager.ts     Holds all entities, runs updates, walkability + terrain checks
     scenes/
       Preloader.ts         Loads sprite sheet, generates tile & building textures, then starts GameScene
-      GameScene.ts         Builds tilemap, spawns entities, loads persisted functions, sets up systems
+      GameScene.ts         Builds tilemap, spawns entities, audits persisted functions, and sets up systems
     ui/
       DialogueBox.ts       UI overlay for player-NPC conversation input
       SpeechBubble.ts      Floating speech bubble above speaking entities
@@ -89,7 +95,7 @@ Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, s
 7. Send world state + memory + goals to Claude via `LLMService.decide()`
 8. Parse response into directives via `DirectiveParser.parseDirectives()`
 9. Execute goal directives instantly (don't count toward budget), then up to 3 action directives via `DirectiveExecutor`. Each runs to completion before the next. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
-10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `TurnManager`
+10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `TurnManager`, with capability checks and rejection feedback handled by `FunctionBuilderService`
 11. Save the log and goals to disk
 12. Trigger summarization of old entries if enough have accumulated
 13. Wait 5 seconds before the next NPC's turn
@@ -230,18 +236,22 @@ The game has interactive building objects that NPCs can use by moving adjacent a
 | Building | Position | Symbol | Description |
 |----------|----------|--------|-------------|
 | Search Terminal | (15,15) | `S` | Searches the web via Tavily API. Use: `use_tool(search_terminal, "query")` |
-| Code Forge | (20,15) | `C` | Creates/updates/deletes executable function buildings. Use: `create_function(...)`, `update_function(...)`, `delete_function(...)` |
+| Code Forge | (20,15) | `C` | Creates, updates, or deletes supported pure-computation function buildings. Unsupported requests are rejected. Use: `create_function(...)`, `update_function(...)`, `delete_function(...)` |
 
 ### NPC-Created Function Buildings
 
 NPCs can create new function buildings at the Code Forge. The flow:
 1. NPC moves adjacent to Code Forge and issues `create_function("description", x, y)`
-2. `ToolService.generateFunctionSpec()` calls the `CODE_GENERATION` LLM prompt to generate a JS implementation
-3. The function is tested in the sandbox (`/api/execute`) before saving
-4. On success, a `FunctionRecord` is persisted to `data/functions/{name}.json` and registered as a new tool building on the map
-5. Other NPCs can then move adjacent and call it via `use_tool(function_name, "args")`
+2. `FunctionBuilderService` screens the request for unsupported capabilities such as email sending, external APIs, filesystem access, or database access
+3. `ToolService.generateFunctionSpec()` calls the `CODE_GENERATION` LLM prompt, which can return either a normal function spec or a structured rejection
+4. Generated code is screened again, then tested in the sandbox (`/api/execute`) before saving
+5. On success, a `FunctionRecord` is persisted to `data/functions/{name}.json` and registered as a new tool building on the map
+6. On rejection or failure, the reason is written into the creator NPC's chronological log so the NPC can react honestly on a later turn
+7. Other NPCs can then move adjacent and call supported functions via `use_tool(function_name, "args")`
 
 Function buildings can also be updated (`update_function`) or deleted (`delete_function`).
+
+Persisted function records are also audited when the scene starts. Unsupported legacy records are removed from `data/functions/`, skipped during building registration, and a system note is appended to the creator NPC's chronological log explaining why the function was removed.
 
 ### Tool System
 

@@ -22,7 +22,7 @@ Each NPC turn:
 7. Call the LLM for a decision (world state + memory + goals)
 8. Parse the response into directives
 9. Execute goal directives instantly (no budget cost), then up to 3 action commands via `DirectiveExecutor`. Each runs to completion before the next. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
-10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`.
+10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`. Code Forge requests are screened for unsupported capabilities, rejected honestly when needed, and only supported pure-computation functions can become buildings.
 11. Save the log and goals to disk
 12. Summarize old log entries if enough have accumulated
 13. Wait 5 seconds before the next NPC
@@ -39,8 +39,8 @@ Each NPC gets a budget of **3 action commands per turn** (`NPC_COMMANDS_PER_TURN
 | `end_conversation()` | End the current conversation | Yes |
 | `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes |
 | `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes |
-| `create_function("desc", x, y)` | Create a new function building at Code Forge (ends turn) | Yes |
-| `update_function("name", "change")` | Update an existing function (ends turn) | Yes |
+| `create_function("desc", x, y)` | Create a new function building at Code Forge; unsupported requests are rejected and logged instead of producing a building (ends turn) | Yes |
+| `update_function("name", "change")` | Update an existing function at Code Forge; unsupported changes are rejected and the current function is left unchanged (ends turn) | Yes |
 | `delete_function("name")` | Delete a function building (ends turn) | Yes |
 | `complete_goal()` | Mark the active goal as done | No |
 | `abandon_goal()` | Give up on the active goal | No |
@@ -48,6 +48,21 @@ Each NPC gets a budget of **3 action commands per turn** (`NPC_COMMANDS_PER_TURN
 | *(unknown)* | If an unparseable or misspelled line is detected, it is intercepted and explicitly logged as an error to the NPC so they can correct themselves. | Yes |
 
 If the LLM returns more than 3 action commands, the extras are silently dropped.
+
+## Code Forge Outcomes
+
+Function directives end the turn immediately, but they do not always produce a building.
+
+- `create_function(...)` and `update_function(...)` are limited to pure synchronous JavaScript that only performs computation on its inputs.
+- Requests involving email sending, external APIs, network access, filesystem access, database access, or other external side effects are rejected.
+- Rejections are written back into the NPC's chronological log so the NPC sees the failure reason on a later turn instead of assuming the function exists.
+- Supported functions still go through placement validation, duplicate-name checks, and a sandbox dry run before they are saved.
+
+Typical log outcomes include:
+
+- `Code Forge rejected request: Cannot send emails: sandbox has no network access or mail service access`
+- `Code Forge rejected update: Cannot access external APIs or the network: sandbox has no network access`
+- `Code Forge created function "sum_values": Calculate the sum of two numbers`
 
 ## Conversations
 
@@ -100,7 +115,7 @@ A fixed label in the top-left corner shows:
 | File | Role |
 |------|------|
 | `src/game/TurnManager.ts` | Turn loop, sleep tracking, log/goal integration, pause control |
-| `src/game/FunctionBuilderService.ts` | Handles the UI and prompt pipeline when crafting, modifying, or deleting function tools |
+| `src/game/FunctionBuilderService.ts` | Handles Code Forge validation, rejection feedback, and registration when crafting, modifying, or deleting function tools |
 | `src/game/DirectiveExecutor.ts` | Executes parsed directives — movement, tools, goals, sleep |
 | `src/game/DirectiveParser.ts` | Parses LLM text into typed directive objects |
 | `src/game/GameConfig.ts` | Constants: `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`, `NPC_TURN_DELAY` |

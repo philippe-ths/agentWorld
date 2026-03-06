@@ -44,6 +44,13 @@ export interface GeneratedFunctionSpec {
     code: string;
 }
 
+export interface RejectedFunctionSpec {
+    rejected: true;
+    reason: string;
+}
+
+export type FunctionGenerationResult = GeneratedFunctionSpec | RejectedFunctionSpec;
+
 export interface FunctionRecord extends GeneratedFunctionSpec {
     tile: TilePos;
     creator: string;

@@ -144,6 +144,14 @@ Rules:
 - Keep implementation short and focused.
 - Function name must be snake_case.
 
+If the requested function requires capabilities the sandbox does not have, do not generate a simulated or placeholder function.
+Unsupported capabilities include network access, sending emails, making API calls, accessing databases, filesystem access, or any other external side effects.
+In those cases, return this exact JSON shape instead:
+{
+  "rejected": true,
+  "reason": "Cannot send emails: sandbox has no network access or mail service access"
+}
+
 Return JSON with this exact shape:
 {
   "name": "snake_case_name",

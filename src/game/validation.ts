@@ -1,4 +1,9 @@
-import { GeneratedFunctionSpec, FunctionRecord } from './GameConfig';
+import {
+    FunctionGenerationResult,
+    GeneratedFunctionSpec,
+    FunctionRecord,
+    RejectedFunctionSpec,
+} from './GameConfig';
 
 const NAME_RE = /^[a-z_][a-z0-9_]*$/;
 
@@ -46,6 +51,36 @@ export function validateGeneratedFunctionSpec(input: unknown): GeneratedFunction
     }
 
     return { name, description, parameters, returnDescription, code };
+}
+
+export function validateRejectedFunctionSpec(input: unknown): RejectedFunctionSpec {
+    if (!input || typeof input !== 'object') {
+        throw new Error('Invalid code-generation rejection: expected object');
+    }
+
+    const raw = input as Record<string, unknown>;
+    if (raw.rejected !== true) {
+        throw new Error('Invalid code-generation rejection: missing rejected=true');
+    }
+
+    const reason = String(raw.reason ?? '').trim();
+    if (!reason) {
+        throw new Error('Invalid code-generation rejection: missing reason');
+    }
+
+    return { rejected: true, reason };
+}
+
+export function validateFunctionGenerationResult(input: unknown): FunctionGenerationResult {
+    if (input && typeof input === 'object' && (input as Record<string, unknown>).rejected === true) {
+        return validateRejectedFunctionSpec(input);
+    }
+
+    return validateGeneratedFunctionSpec(input);
+}
+
+export function isRejectedFunctionSpec(input: FunctionGenerationResult): input is RejectedFunctionSpec {
+    return 'rejected' in input && input.rejected === true;
 }
 
 export function validateFunctionRecord(input: unknown): FunctionRecord {

@@ -120,6 +120,16 @@ export class ChronologicalLog {
         }
     }
 
+    appendSystemNote(description: string): void {
+        const latestEntry = this.entries[this.entries.length - 1];
+        if (latestEntry) {
+            latestEntry.lines.push(description);
+            return;
+        }
+
+        this.entries.push({ turnNumber: 0, lines: [description] });
+    }
+
     buildPromptContent(charBudget: number): string {
         if (this.summaries.length === 0 && this.entries.length === 0) return '';
 

@@ -171,6 +171,10 @@ export class TurnManager {
                 'color: #ff4444; font-weight: bold; font-size: 14px',
             );
             this.turnLabel.setText(`⚠ ${npc.name}: LLM error — waiting`);
+            
+            // Fix: Feed the error back to the NPC's memory log
+            log.recordAction(`My action failed because my response wasn't understood: ${msg}`);
+            
             directives = [{ type: 'wait' }];
         }
 
@@ -193,6 +197,11 @@ export class TurnManager {
         for (const dir of capped) {
             await this.waitIfConversationPaused();
 
+            if (dir.type === 'unknown') {
+                log.recordAction(`I tried to use an unknown command: "${dir.line}"`);
+                continue;
+            }
+
             if (dir.type === 'create_function') {
                 await this.functionBuilder.handleCreateFunction(npc, log, dir.description, dir.x, dir.y);
                 break;
@@ -208,8 +217,15 @@ export class TurnManager {
                 break;
             }
 
-            const shouldStop = await this.executor.executeAction(npc, dir, log, this.turnNumber);
-            if (shouldStop) break;
+            try {
+                const shouldStop = await this.executor.executeAction(npc, dir, log, this.turnNumber);
+                if (shouldStop) break;
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error(`%c[TurnManager] Action error for ${npc.name}: ${msg}`, 'color: #ff4444');
+                log.recordAction(`My action '${dir.type}' failed with an exception: ${msg}`);
+                break;
+            }
         }
 
         // Check if NPC chose to sleep (blocked if they have an active goal)

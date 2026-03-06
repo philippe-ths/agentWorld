@@ -1,6 +1,7 @@
 import { NPC } from './entities/NPC';
 import { ChronologicalLog } from './ChronologicalLog';
-import { FunctionRecord } from './GameConfig';
+import { FunctionRecord, GeneratedFunctionSpec } from './GameConfig';
+import { findUnsupportedFunctionReason, findUnsupportedRequestReason } from './FunctionCapability';
 import { ToolRegistry } from './ToolRegistry';
 import {
     deleteFunctionRecord,
@@ -10,6 +11,7 @@ import {
     saveFunctionRecord,
     testFunctionSpec,
 } from './ToolService';
+import { isRejectedFunctionSpec } from './validation';
 import { isGrassTile, isSpawnTile, isWithinMapBounds, isAdjacentToBuilding, isBuildingAt } from './MapData';
 
 export class FunctionBuilderService {
@@ -34,8 +36,25 @@ export class FunctionBuilderService {
             return;
         }
 
+        const requestRejection = findUnsupportedRequestReason(description);
+        if (requestRejection) {
+            this.logForgeRejection(log, 'request', requestRejection);
+            return;
+        }
+
         try {
             const generated = await generateFunctionSpec(description);
+            if (isRejectedFunctionSpec(generated)) {
+                this.logForgeRejection(log, 'request', generated.reason);
+                return;
+            }
+
+            const unsupportedResult = this.findUnsupportedGeneratedSpecReason(generated);
+            if (unsupportedResult) {
+                this.logForgeRejection(log, 'request', unsupportedResult);
+                return;
+            }
+
             if (this.toolRegistry.getById(generated.name)) {
                 log.recordAction(`I used Code Forge to create function but it failed: Function "${generated.name}" already exists`);
                 return;
@@ -56,7 +75,7 @@ export class FunctionBuilderService {
             await saveFunctionRecord(record);
             this.registerFunctionBuilding(record);
 
-            log.recordAction(`I used Code Forge to create function "${record.name}": ${record.description}`);
+            log.recordAction(`Code Forge created function "${record.name}": ${record.description}`);
             log.recordAction(`Function building placed at (${x},${y})`);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -73,6 +92,12 @@ export class FunctionBuilderService {
         const forge = this.toolRegistry.getById('code_forge');
         if (!isAdjacentToBuilding(npc.tilePos, forge)) {
             log.recordAction('I tried to use Code Forge but I am not adjacent to it');
+            return;
+        }
+
+        const requestRejection = findUnsupportedRequestReason(changeDescription);
+        if (requestRejection) {
+            this.logForgeRejection(log, 'update', requestRejection);
             return;
         }
 
@@ -93,6 +118,17 @@ export class FunctionBuilderService {
                 changeDescription,
             );
 
+            if (isRejectedFunctionSpec(updated)) {
+                this.logForgeRejection(log, 'update', updated.reason);
+                return;
+            }
+
+            const unsupportedResult = this.findUnsupportedGeneratedSpecReason(updated);
+            if (unsupportedResult) {
+                this.logForgeRejection(log, 'update', unsupportedResult);
+                return;
+            }
+
             const updatedRecord: FunctionRecord = {
                 ...updated,
                 name: existing.name,
@@ -108,7 +144,7 @@ export class FunctionBuilderService {
 
             await saveFunctionRecord(updatedRecord);
             this.registerFunctionBuilding(updatedRecord);
-            log.recordAction(`I used Code Forge to update function "${updatedRecord.name}": ${changeDescription}`);
+            log.recordAction(`Code Forge updated function "${updatedRecord.name}": ${updatedRecord.description}`);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             log.recordAction(`I used Code Forge to update function but it failed: ${msg}`);
@@ -167,6 +203,15 @@ export class FunctionBuilderService {
         }
 
         return null;
+    }
+
+    private findUnsupportedGeneratedSpecReason(spec: GeneratedFunctionSpec): string | null {
+        return findUnsupportedFunctionReason(spec);
+    }
+
+    private logForgeRejection(log: ChronologicalLog, kind: 'request' | 'update', reason: string): void {
+        const noun = kind === 'update' ? 'update' : 'request';
+        log.recordAction(`Code Forge rejected ${noun}: ${reason}`);
     }
 
     registerFunctionBuilding(record: FunctionRecord): void {

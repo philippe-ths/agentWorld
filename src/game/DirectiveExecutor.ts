@@ -100,8 +100,14 @@ export class DirectiveExecutor {
                 }
                 console.log(`%c[${npc.name}] use_tool(${dir.toolId}, "${dir.args}")`, 'color: #6bff6b');
                 log.recordAction(`I used ${building.displayName}: "${dir.args}"`);
-                const result = await building.execute(dir.args);
-                log.recordAction(`Result: ${result}`);
+                try {
+                    const result = await building.execute(dir.args);
+                    log.recordAction(`Result: ${result}`);
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    console.warn(`%c[${npc.name}] use_tool error: ${msg}`, 'color: #ffaa00');
+                    log.recordAction(`The tool execution failed: ${msg}`);
+                }
                 return true;
             }
             case 'sleep':

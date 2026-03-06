@@ -58,9 +58,14 @@ export interface DeleteFunctionDirective {
     functionName: string;
 }
 
+export interface UnknownDirective {
+    type: 'unknown';
+    line: string;
+}
+
 export type Directive = MoveToDirective | WaitDirective | StartConversationDirective | EndConversationDirective
     | CompleteGoalDirective | AbandonGoalDirective | SwitchGoalDirective | UseToolDirective | SleepDirective
-    | CreateFunctionDirective | UpdateFunctionDirective | DeleteFunctionDirective;
+    | CreateFunctionDirective | UpdateFunctionDirective | DeleteFunctionDirective | UnknownDirective;
 
 const MOVE_TO_RE = /^move_to\(\s*(\d+)\s*,\s*(\d+)\s*\)$/;
 const WAIT_RE = /^wait\(\s*\)$/;
@@ -122,6 +127,7 @@ export function parseDirectives(text: string): Directive[] {
             });
         } else {
             console.warn(`%c[DirectiveParser] Unknown directive: "${line}"`, 'color: #ffaa00; font-weight: bold');
+            directives.push({ type: 'unknown', line });
         }
     }
 

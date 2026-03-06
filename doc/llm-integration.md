@@ -62,11 +62,52 @@ Used by `GoalExtractor.extractGoal()` after conversations end. The system prompt
 
 ### 5. Code Generation (`CODE_GENERATION`)
 
-Used by `ToolService.generateFunctionSpec()` (working alongside `validation.ts`) when an NPC creates or updates a function at the Code Forge via the `FunctionBuilderService`. The system prompt instructs the LLM to generate a synchronous, pure JS function implementation.
+Used by `ToolService.generateFunctionSpec()` (working alongside `validation.ts`) when an NPC creates or updates a function at the Code Forge via the `FunctionBuilderService`. The system prompt instructs the LLM to either generate a synchronous, pure JS function implementation or return a structured rejection when the request needs unsupported capabilities.
 
 **Model:** Sonnet | **Max tokens:** 512
 
-**Context sent:** natural-language description, optionally existing function code + change description. Returns JSON: `{ name, description, parameters[], returnDescription, code }`.
+**Context sent:** natural-language description, optionally existing function code + change description.
+
+Supported Code Forge work is limited to pure synchronous computation inside the sandbox. Unsupported capabilities include:
+
+- email sending or other outbound messaging
+- external API calls or network access
+- filesystem access
+- database access
+- any other external side effect outside pure computation
+
+`CODE_GENERATION` now has two valid JSON outcomes.
+
+Successful function spec:
+
+```json
+{
+  "name": "sum_values",
+  "description": "Calculate the sum of two numbers",
+  "parameters": [
+    { "name": "left", "type": "number" },
+    { "name": "right", "type": "number" }
+  ],
+  "returnDescription": "The numeric sum",
+  "code": "return left + right;"
+}
+```
+
+Structured rejection:
+
+```json
+{
+  "rejected": true,
+  "reason": "Cannot send emails: sandbox has no network access or mail service access"
+}
+```
+
+The full rejection chain is:
+
+1. Request-level capability screening in `FunctionCapability.ts` catches obvious unsupported requests before the LLM call.
+2. The `CODE_GENERATION` prompt can return a structured rejection if the request still reaches the model.
+3. Generated code is screened again before it can be tested or persisted.
+4. Rejection or failure outcomes are written into the NPC's chronological log so the NPC can adapt on later turns instead of repeating the same impossible request.
 
 ## Directives
 
@@ -80,8 +121,8 @@ The LLM responds with commands, one per line:
 | `end_conversation()` | End the current conversation | Yes |
 | `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes |
 | `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes |
-| `create_function("desc", x, y)` | Create a new function building at Code Forge (ends turn) | Yes |
-| `update_function("name", "change")` | Update an existing function (ends turn) | Yes |
+| `create_function("desc", x, y)` | Attempt to create a new function building at Code Forge; unsupported requests are rejected and logged (ends turn) | Yes |
+| `update_function("name", "change")` | Attempt to update an existing function; unsupported changes are rejected and logged (ends turn) | Yes |
 | `delete_function("name")` | Delete a function building (ends turn) | Yes |
 | `complete_goal()` | Mark the active goal as done | No |
 | `abandon_goal()` | Give up on the active goal | No |
@@ -175,6 +216,8 @@ Goal directives (`complete_goal`, `abandon_goal`, `switch_goal`) let NPCs manage
 - The on-screen turn label shows the error message
 - The NPC falls back to `wait()` so the game loop continues
 - Unknown directives from the LLM are logged as yellow warnings
+- Code Forge rejections are treated as first-class outcomes and recorded explicitly in the NPC's chronological log
+- **Core Principle**: All execution outcomes, particularly parse errors and tool/sandbox fail states, MUST be explicitly fed back into the NPC's Chronological Log (`log.recordAction(error)`). If errors are only console-logged or thrown uncaught, the NPC loses feedback, repeats the exact same failing command on the next turn, and gets stuck in a loop.
 
 ## Debugging
 

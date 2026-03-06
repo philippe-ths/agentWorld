@@ -1,9 +1,9 @@
 import { LLM_ENDPOINTS } from './GameConfig';
 import { CODE_GENERATION } from './prompts';
-import { FunctionRecord, GeneratedFunctionSpec } from './GameConfig';
+import { FunctionGenerationResult, FunctionRecord, GeneratedFunctionSpec } from './GameConfig';
 import {
     parseJsonFromModelText,
-    validateGeneratedFunctionSpec,
+    validateFunctionGenerationResult,
     validateFunctionRecord,
     defaultValueForType
 } from './validation';
@@ -47,7 +47,7 @@ export async function generateFunctionSpec(
     description: string,
     existing?: { name: string; code: string; description: string },
     changeDescription?: string,
-): Promise<GeneratedFunctionSpec> {
+): Promise<FunctionGenerationResult> {
     const requestLines = [
         `Create a function for this request: ${description}`,
     ];
@@ -80,7 +80,7 @@ export async function generateFunctionSpec(
     const data = await res.json();
     const text = String(data.text ?? '').trim();
     const parsed = parseJsonFromModelText(text);
-    return validateGeneratedFunctionSpec(parsed);
+    return validateFunctionGenerationResult(parsed);
 }
 
 export async function executeFunction(

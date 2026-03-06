@@ -10,7 +10,10 @@ import { ConversationManager } from '../ConversationManager';
 import { showSpeechBubble } from '../ui/SpeechBubble';
 import { DialogueBox } from '../ui/DialogueBox';
 import { ToolRegistry } from '../ToolRegistry';
-import { executeFunction, loadFunctionRecords, searchWeb } from '../ToolService';
+import { ChronologicalLog } from '../ChronologicalLog';
+import { buildRemovedFunctionNote, partitionPersistedFunctionRecords } from '../PersistedFunctionAudit';
+import { executeFunction, deleteFunctionRecord, loadFunctionRecords, searchWeb } from '../ToolService';
+import { FunctionRecord } from '../GameConfig';
 import { FONT, NPCS, PLAYER_SPAWN, BUILDINGS } from '../GameConfig';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
@@ -324,7 +327,14 @@ export class GameScene extends Scene {
 
     private async loadPersistedFunctions(): Promise<void> {
         const records = await loadFunctionRecords();
-        for (const record of records) {
+        const { supported, unsupported } = partitionPersistedFunctionRecords(records);
+
+        for (const item of unsupported) {
+            await deleteFunctionRecord(item.record.name);
+            await this.appendRemovedFunctionNote(item.record, item.reason);
+        }
+
+        for (const record of supported) {
             const parameterNames = record.parameters.map(p => p.name);
             this.toolRegistry.registerFunctionBuilding(record, async (rawArgs: string) => {
                 const parsedArgs = rawArgs
@@ -335,8 +345,15 @@ export class GameScene extends Scene {
             });
         }
 
-        if (records.length > 0) {
+        if (supported.length > 0) {
             this.placeBuildingLabels();
         }
+    }
+
+    private async appendRemovedFunctionNote(record: FunctionRecord, reason: string): Promise<void> {
+        const log = new ChronologicalLog(record.creator);
+        await log.load();
+        log.appendSystemNote(buildRemovedFunctionNote(record, reason));
+        await log.save();
     }
 }

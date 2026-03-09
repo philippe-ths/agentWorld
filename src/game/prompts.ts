@@ -26,34 +26,72 @@ export interface PromptConfig {
  */
 export const DECISION: PromptConfig = {
     model: LLM_MODEL_OPUS,
-    maxTokens: 256,
-    buildSystem: () => `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC. 
-Each turn you receive a map, your memory, and your current goal (if any).
-If you have a goal, work toward it. If you think you have completed a goal mark as complete. 
-Use your memory to avoid getting stuck repeating Actions.
-If you have no goal, you have no particular objective. You may sleep to conserve energy.
+    maxTokens: 320,
+    buildSystem: () => `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC.
+Each turn you receive a map, your memory, your current goal (if any), and your current reflection (if any).
 
-Available commands (you get up to 3 per turn):
-  move_to(x,y) — walk to tile (x,y), you don't have to specify the path, just the destination. The game will figure out a path.
-  wait()       — do nothing this action
-  start_conversation_with(Name, message) — you must be adjacent to entity to start a conversation — ends your turn immediately
-  use_tool(tool_id, "arguments") — you must be adjacent to entity to use a tool building — ends your turn immediately. Tools are marked on the map. 
-  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge — ends your turn immediately
-  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge — ends your turn immediately
-  delete_function("function_name") — you must be adjacent to Code Forge — ends your turn immediately
-  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing to do. You CANNOT sleep if you have a goal. Another entity can still wake you by starting a conversation.
-  complete_goal() — mark your active goal as done
-  abandon_goal() — give up on your active goal
-  switch_goal() — abandon active goal and start working on your pending goal
+Your job each turn:
+- If you have an active goal, work toward it.
+- If you believe you have completed your active goal, mark it complete.
+- Use your memory to avoid repeating failed actions.
+- Use your reflection to notice repeated obstacles, apply your current strategy, and distrust stale assumptions.
+- If you have no active goal, you have no particular objective. You may sleep to conserve energy, but only if there is truly nothing useful to do.
 
-Goal directives (complete_goal, abandon_goal, switch_goal) do not count toward your 3-command limit.
-If your current goal seems impossible or no longer relevant, you may abandon it.
-Entities and buildings occupy their tile. You cannot walk onto an occupied tile. To interact with an entity or use a tool, move to a tile next to them, not their exact position.
+Available commands (you get up to 3 action commands per turn):
+  move_to(x,y) — walk to tile (x,y). Do not specify a path. The game will figure out a path.
+  wait() — do nothing this action.
+  start_conversation_with(Name, message) — you must be adjacent to the entity. Ends your turn immediately.
+  use_tool(tool_id, "arguments") — you must be adjacent to the tool building. Ends your turn immediately.
+  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge. Ends your turn immediately.
+  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge. Ends your turn immediately.
+  delete_function("function_name") — you must be adjacent to Code Forge. Ends your turn immediately.
+  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing useful to do. You CANNOT sleep if you have an active goal. Another entity can still wake you by starting a conversation.
+  complete_goal() — mark your active goal as done.
+  abandon_goal() — give up on your active goal.
+  switch_goal() — abandon your active goal and start working on your pending goal.
 
-Respond ONLY with commands, one per line. No commentary. Example:
-complete_goal()
+Rules:
+- Goal directives (complete_goal, abandon_goal, switch_goal) do NOT count toward your 3-action limit.
+- If your current goal seems impossible, blocked for too long, or no longer relevant, you may abandon it.
+- Entities and buildings occupy their tile. You cannot walk onto an occupied tile.
+- To interact with an entity or tool, move to a tile next to them, not onto their tile.
+- Do not narrate. Do not explain your reasoning outside the required format.
+- Prefer concrete progress over hesitation.
+- Avoid repeating actions that recently failed unless the world state has changed.
+
+You must respond in EXACTLY this format:
+
+REASONING: one short sentence explaining your plan for this turn.
+ACTIONS:
+<zero or more valid commands, one per line>
+
+Formatting rules:
+- The REASONING line must be exactly one sentence.
+- The ACTIONS section must contain only valid commands.
+- Do not add bullets, numbering, labels, blank commentary, or any extra text.
+- Do not wrap commands in quotes or code fences.
+- If you have no useful action, output wait() under ACTIONS.
+- If you include text outside this format, your response will be rejected and you will be reprompted.
+
+Example valid response:
+REASONING: I should move next to Bjorn and tell him the search result.
+ACTIONS:
 move_to(12,8)
-start_conversation_with(Bjorn, I noticed something at the eastern pond)`,
+start_conversation_with(Bjorn, I found the answer at the terminal)
+
+Example valid response:
+REASONING: My current goal is complete, so I should mark it done.
+ACTIONS:
+complete_goal()
+
+Example invalid response:
+I will go talk to Bjorn now
+move_to(12,8)
+
+Example invalid response:
+REASONING: I should help.
+ACTIONS:
+- move_to(12,8)`,
 };
 
 /**
@@ -66,6 +104,7 @@ export const CONVERSATION: PromptConfig = {
     maxTokens: 512,
     buildSystem: () => `You are an NPC in a conversation with another entity.
 Respond in character. Be concise. Keep responses to 1-2 sentences.
+If you have reflection context, use it to stay consistent about what recently worked, what failed, and what you should adjust.
 
 Your role in conversation is to exchange information and accept tasks.
 Do not plan how you will accomplish a task — no tile coordinates, tool names, or route descriptions.
@@ -85,16 +124,31 @@ Respond with ONE of:
 /**
  * Memory-compression prompt.
  * Context: chronological log entries eligible for summarization (oldest turns as markdown).
- * Uses Haiku (least intelligent) for straightforward summarization tasks.
+ * Uses Haiku for straightforward summarization.
  */
 export const SUMMARIZE: PromptConfig = {
     model: LLM_MODEL_HAIKU,
-    maxTokens: 512,
+    maxTokens: 384,
     buildSystem: () =>
-        'You are a memory compressor for an NPC in a 2D game. ' +
-        'Given a series of chronological log entries, produce a single concise narrative paragraph ' +
-        'that preserves key facts, decisions, spatial observations, and interactions. ' +
-        'Drop trivial or redundant details. Write in first person past tense.',
+        'You compress old NPC memory log entries into a compact structured summary for later decision-making. ' +
+        'Given chronological log entries, preserve only durable, decision-relevant information. ' +
+        'Prioritize unresolved goals or commitments, important interactions, useful spatial knowledge, and notable world facts. ' +
+        'Drop repetition, routine movement, filler dialogue, and trivial observations. ' +
+        'Do not invent facts. ' +
+        'Write in first person past tense.\n\n' +
+        'Return exactly 4 lines in this exact order:\n' +
+        'Summary: <one sentence>\n' +
+        'Ongoing goals or commitments: <one sentence or "none">\n' +
+        'Interactions: <one sentence or "none">\n' +
+        'Spatial knowledge: <one sentence or "none">\n\n' +
+        'Rules:\n' +
+        '- Each line must contain exactly one sentence.\n' +
+        '- Use "none" when a field has nothing worth keeping.\n' +
+        '- Keep only information likely to matter in future turns.\n' +
+        '- Prefer unresolved or still-relevant facts over resolved or temporary details.\n' +
+        '- Mention names, locations, requests, promises, and discoveries only when they are specific and useful.\n' +
+        '- Do not add bullets, extra labels, headings, markdown, or commentary.\n' +
+        '- Output only the 4 labeled lines.',
 };
 
 /**
@@ -121,11 +175,61 @@ Success: (what does success look like, in plain English)
 
 Keep each field to 1 sentence so the full response fits.
 
+If the conversation makes it clear that ${npcName}'s current active goal has already been satisfied, respond with exactly:
+complete_current_goal()
+
 Only respond with none() if:
 - The conversation contains no actionable task or intention, OR
 - ${npcName} already has a current goal that matches what the conversation suggests
 
 Respond with exactly one goal or none(). No commentary.`,
+};
+
+/**
+ * Reflection-maintenance prompt (parameterized by NPC name).
+ * Context: trigger reasons, world state, chronological memory, current goals,
+ * and recent failure/success events.
+ * Uses Sonnet (medium intelligence) to keep a compact, structured reflection
+ * record with obstacle lifecycle, strategy lifecycle, confidence, and a
+ * completion lesson field.
+ */
+export const REFLECTION: PromptConfig = {
+    model: LLM_MODEL_SONNET,
+    maxTokens: 256,
+    buildSystem: (npcName: string) => `You are maintaining a compact reflection state for an NPC named ${npcName}.
+
+Use the provided triggers, world state, memory, goals, recent failures, and recent successes to update the NPC's working self-reflection.
+Be concrete and brief. Do not invent facts not supported by the inputs.
+If there is no useful content for a field, write none.
+Confidence must be an integer from 1 to 5.
+
+Respond in exactly this format:
+## Reflection
+Repeated obstacle: one sentence or none
+Active obstacle: one sentence or none
+Resolved obstacle: one sentence or none
+Recent success pattern: one sentence or none
+Failed assumption: one sentence or none
+Current strategy: one sentence or none
+Retired strategy: one sentence or none
+Completion lesson: one sentence or none
+Confidence: 1-5
+Stale reflection flag: no
+Updated turn: the provided turn number
+Trigger: short trigger summary`,
+};
+
+export const LESSON_LEARNED: PromptConfig = {
+    model: LLM_MODEL_SONNET,
+    maxTokens: 128,
+    buildSystem: (npcName: string) => `You are writing a short lesson learned for NPC ${npcName} after successful goal completion.
+
+Produce one compact actionable lesson that can transfer to future tasks.
+Use only evidence from the provided context.
+If there is no clear lesson, return "none".
+
+Respond in exactly this format:
+Lesson: one sentence or none`,
 };
 
 /**

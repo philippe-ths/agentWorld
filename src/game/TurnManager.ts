@@ -2,7 +2,7 @@ import { NPC } from './entities/NPC';
 import { Player } from './entities/Player';
 import { Entity } from './entities/Entity';
 import { LLMService } from './LLMService';
-import { parseDirectives, Directive } from './DirectiveParser';
+import { parseDirectives, Directive, repairDirectiveOutput, validateDirectiveOutput } from './DirectiveParser';
 import { buildWorldState } from './WorldState';
 import { EntityManager } from './entities/EntityManager';
 import { ChronologicalLog } from './ChronologicalLog';
@@ -11,12 +11,20 @@ import { ConversationManager } from './ConversationManager';
 import { ToolRegistry } from './ToolRegistry';
 import { DirectiveExecutor } from './DirectiveExecutor';
 import { FunctionBuilderService } from './FunctionBuilderService';
+import { ReflectionManager } from './ReflectionManager';
 import {
-    SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN,
+    SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS, UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD,
+    OUTPUT_GUARD_REPROMPT_ATTEMPTS, LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN,
     NPC_TURN_DELAY, FONT, SLEEP_TURNS,
 } from './GameConfig';
 
 type TurnState = 'idle' | 'npc-turn' | 'paused';
+
+interface GuardedDecision {
+    cleanedResponse: string;
+    unknownCountFromRaw: number;
+    reasoning?: string;
+}
 
 export class TurnManager {
     private npcs: NPC[];
@@ -30,6 +38,7 @@ export class TurnManager {
     private pauseResolve: (() => void) | null = null;
     private logs = new Map<string, ChronologicalLog>();
     private goals = new Map<string, GoalManager>();
+    private reflections = new Map<string, ReflectionManager>();
     private executor: DirectiveExecutor;
     private toolRegistry: ToolRegistry;
     private sleepUntil = new Map<string, number>();
@@ -67,6 +76,10 @@ export class TurnManager {
             const goalMgr = new GoalManager(npc.name);
             await goalMgr.load();
             this.goals.set(npc.name, goalMgr);
+
+            const reflectionMgr = new ReflectionManager(npc.name);
+            await reflectionMgr.load();
+            this.reflections.set(npc.name, reflectionMgr);
         }
 
         // Resume turn counter from persisted logs
@@ -147,6 +160,7 @@ export class TurnManager {
 
         const log = this.logs.get(npc.name)!;
         const goalManager = this.goals.get(npc.name)!;
+        const reflectionManager = this.reflections.get(npc.name)!;
         const entities = this.allEntities.getEntities();
 
         // Record observations for this turn
@@ -157,13 +171,48 @@ export class TurnManager {
         );
 
         let directives: Directive[];
+        let worldState = '';
+        let memory = '';
+        let goalsContent = '';
+        let reflectionContent = '';
 
         try {
-            const worldState = buildWorldState(npc, entities, this.toolRegistry);
-            const memory = log.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
-            const goalsContent = goalManager.buildPromptContent() || undefined;
-            const response = await this.llm.decide(npc.name, worldState, memory, goalsContent);
-            directives = parseDirectives(response);
+            worldState = buildWorldState(npc, entities, this.toolRegistry);
+            memory = log.buildPromptContent(LOG_CHAR_BUDGET);
+            goalsContent = goalManager.buildPromptContent();
+            reflectionManager.markPeriodicStale(this.turnNumber, REFLECTION_EVERY_N_TURNS);
+            await reflectionManager.refreshIfStale(this.turnNumber, worldState, memory, goalsContent);
+            reflectionContent = reflectionManager.buildPromptContent();
+
+            const response = await this.llm.decide(
+                npc.name,
+                worldState,
+                memory || undefined,
+                goalsContent || undefined,
+                reflectionContent || undefined,
+            );
+
+            const guarded = await this.enforceOutputGuard(
+                npc.name,
+                response,
+                worldState,
+                memory,
+                goalsContent,
+                reflectionContent,
+                reflectionManager,
+                log,
+            );
+
+            if (guarded.unknownCountFromRaw >= UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD) {
+                reflectionManager.markUnknownDirectiveFlood(this.turnNumber, guarded.unknownCountFromRaw);
+                await reflectionManager.refreshIfStale(this.turnNumber, worldState, memory, goalsContent);
+            }
+
+            if (guarded.reasoning) {
+                log.recordAction(`Reasoning: ${guarded.reasoning}`);
+            }
+
+            directives = parseDirectives(guarded.cleanedResponse);
         } catch (err) {
             const msg = (err as Error).message;
             console.error(
@@ -174,6 +223,12 @@ export class TurnManager {
             
             // Fix: Feed the error back to the NPC's memory log
             log.recordAction(`My action failed because my response wasn't understood: ${msg}`);
+            reflectionManager.recordEvent({
+                turnNumber: this.turnNumber,
+                kind: 'failure',
+                summary: `Decision failed: ${msg}`,
+                obstacleKey: `llm_error:${msg}`,
+            });
             
             directives = [{ type: 'wait' }];
         }
@@ -188,7 +243,21 @@ export class TurnManager {
 
         // Execute goal directives first (instant, no budget cost)
         for (const dir of goalDirectives) {
-            await this.executor.executeGoal(npc, dir, log, goalManager);
+            const result = await this.executor.executeGoal(npc, dir, log, goalManager);
+            if (!result) continue;
+            if (result.type === 'completed_goal') {
+                reflectionManager.markGoalCompleted(this.turnNumber, result.goal);
+                await reflectionManager.generateCompletionLesson(
+                    this.turnNumber,
+                    result.goal,
+                    memory,
+                    worldState,
+                );
+            } else if (result.type === 'abandoned_goal') {
+                reflectionManager.markGoalAbandoned(this.turnNumber, result.goal);
+            } else if (result.type === 'switched_goal') {
+                reflectionManager.markGoalSwitched(this.turnNumber, result.oldGoal, result.newGoal);
+            }
         }
 
         // Cap action directives at NPC_COMMANDS_PER_TURN
@@ -218,12 +287,21 @@ export class TurnManager {
             }
 
             try {
-                const shouldStop = await this.executor.executeAction(npc, dir, log, this.turnNumber);
-                if (shouldStop) break;
+                const result = await this.executor.executeAction(npc, dir, log, this.turnNumber);
+                if (result.reflectionEvent) {
+                    reflectionManager.recordEvent(result.reflectionEvent);
+                }
+                if (result.shouldStop) break;
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`%c[TurnManager] Action error for ${npc.name}: ${msg}`, 'color: #ff4444');
                 log.recordAction(`My action '${dir.type}' failed with an exception: ${msg}`);
+                reflectionManager.recordEvent({
+                    turnNumber: this.turnNumber,
+                    kind: 'failure',
+                    summary: `Action ${dir.type} threw an exception`,
+                    obstacleKey: `action_exception:${dir.type}`,
+                });
                 break;
             }
         }
@@ -233,6 +311,12 @@ export class TurnManager {
             if (goalManager.getActiveGoal()) {
                 console.log(`%c[${npc.name}] sleep() rejected — has active goal`, 'color: #ffaa00; font-weight: bold');
                 log.recordAction('I tried to sleep but I have an active goal to work on');
+                reflectionManager.recordEvent({
+                    turnNumber: this.turnNumber,
+                    kind: 'failure',
+                    summary: 'Sleep blocked by active goal',
+                    obstacleKey: 'sleep_blocked:active_goal',
+                });
             } else {
                 this.sleepUntil.set(npc.name, this.turnNumber + SLEEP_TURNS);
                 npc.setSleeping(true);
@@ -245,6 +329,7 @@ export class TurnManager {
         await log.save();
         await log.maybeSummarize(SUMMARIZE_EVERY_N_TURNS);
         await goalManager.save();
+        await reflectionManager.save();
     }
 
     private delay(ms: number): Promise<void> {
@@ -325,8 +410,70 @@ export class TurnManager {
         return this.goals;
     }
 
+    getReflections(): Map<string, ReflectionManager> {
+        return this.reflections;
+    }
+
 
     getLlm(): LLMService {
         return this.llm;
+    }
+
+    private async enforceOutputGuard(
+        npcName: string,
+        rawResponse: string,
+        worldState: string,
+        memory: string,
+        goals: string,
+        reflection: string,
+        reflectionManager: ReflectionManager,
+        log: ChronologicalLog,
+    ): Promise<GuardedDecision> {
+        const parsedRaw = parseDirectives(rawResponse);
+        const unknownCountFromRaw = parsedRaw.filter(d => d.type === 'unknown').length;
+
+        let candidate = rawResponse;
+        let reasoning: string | undefined;
+
+        for (let attempt = 0; attempt <= OUTPUT_GUARD_REPROMPT_ATTEMPTS; attempt++) {
+            const repaired = repairDirectiveOutput(candidate);
+            const validation = validateDirectiveOutput(repaired.cleanedText);
+
+            if (repaired.reasoning) {
+                reasoning = repaired.reasoning;
+            }
+
+            if (repaired.removedLines.length > 0) {
+                reflectionManager.recordOutputFormatFailure(
+                    this.turnNumber,
+                    'output_format:non_command_lines',
+                    `Removed ${repaired.removedLines.length} non-command lines before execution`,
+                );
+            }
+
+            if (validation.isValid) {
+                return { cleanedResponse: repaired.cleanedText, unknownCountFromRaw, reasoning };
+            }
+
+            const failureKey = validation.failureKey ?? 'output_format:invalid_response';
+            const reason = validation.reason ?? 'Directive output failed validation.';
+            reflectionManager.recordOutputFormatFailure(this.turnNumber, failureKey, reason);
+
+            if (attempt >= OUTPUT_GUARD_REPROMPT_ATTEMPTS) {
+                log.recordAction(`My output format was invalid and execution was guarded: ${reason}`);
+                return { cleanedResponse: 'wait()', unknownCountFromRaw, reasoning };
+            }
+
+            candidate = await this.llm.decide(
+                npcName,
+                worldState,
+                memory || undefined,
+                goals || undefined,
+                reflection || undefined,
+                `Your previous output failed strict validation. ${reason} Respond in EXACTLY this format:\nREASONING: one short sentence explaining your plan.\nACTIONS:\n<commands, one per line>`,
+            );
+        }
+
+        return { cleanedResponse: 'wait()', unknownCountFromRaw, reasoning };
     }
 }

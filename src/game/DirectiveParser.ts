@@ -208,6 +208,8 @@ export function parseDirectives(text: string): Directive[] {
                 type: 'delete_function',
                 functionName: match[1],
             });
+        } else if (REASONING_RE.test(line) || ACTIONS_HEADER_RE.test(line)) {
+            continue;
         } else {
             console.warn(`%c[DirectiveParser] Unknown directive: "${line}"`, 'color: #ffaa00; font-weight: bold');
             directives.push({ type: 'unknown', line });

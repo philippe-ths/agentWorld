@@ -27,6 +27,7 @@ export const LLM_ENDPOINTS = {
     search: '/api/search',
     logs: '/api/logs',
     goals: '/api/goals',
+    reflections: '/api/reflections',
     execute: '/api/execute',
     functions: '/api/functions',
 } as const;
@@ -59,6 +60,9 @@ export interface FunctionRecord extends GeneratedFunctionSpec {
 // ── Gameplay tuning ──────────────────────────────────────────
 
 export const SUMMARIZE_EVERY_N_TURNS = 5;
+export const REFLECTION_EVERY_N_TURNS = 5;
+export const UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD = 2;
+export const OUTPUT_GUARD_REPROMPT_ATTEMPTS = 1;
 export const LOG_CHAR_BUDGET = 4000;
 export const MAX_EXCHANGES = 6;
 export const NPC_COMMANDS_PER_TURN = 3;

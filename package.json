@@ -1,6 +1,6 @@
 {
     "name": "agent-world",
-    "description": "A Phaser 3 isometric game with a player and wandering NPCs.",
+    "description": "A Phaser 3 isometric game with a player and NPCs.",
     "version": "1.0.0",
     "private": true,
     "license": "MIT",

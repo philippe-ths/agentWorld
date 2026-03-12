@@ -60,6 +60,46 @@ function parseMarkdown(md: string): { summaries: Summary[]; entries: TurnEntry[]
     return { summaries, entries };
 }
 
+function escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractField(text: string, label: string, nextLabels: string[] = []): string | null {
+    const escapedLabel = escapeRegex(label);
+    const next = nextLabels.length > 0
+        ? `(?=^(${nextLabels.map(escapeRegex).join('|')}):\\s*|$)`
+        : '$';
+    const re = new RegExp(`^${escapedLabel}:\\s*([\\s\\S]*?)${next}`, 'm');
+    const match = text.match(re);
+    const value = match?.[1]?.trim();
+    return value || null;
+}
+
+export function parseStructuredSummaryText(text: string): string {
+    const normalized = text.replace(/\r\n?/g, '\n').trim();
+    const summary = extractField(normalized, 'Summary', ['Ongoing goals or commitments', 'Interactions', 'Spatial knowledge']);
+    const ongoingGoalsOrCommitments = extractField(normalized, 'Ongoing goals or commitments', ['Interactions', 'Spatial knowledge']);
+    const interactions = extractField(normalized, 'Interactions', ['Spatial knowledge']);
+    const spatialKnowledge = extractField(normalized, 'Spatial knowledge');
+
+    if (!summary || !ongoingGoalsOrCommitments || !interactions || !spatialKnowledge) {
+        const missing = [
+            summary ? '' : 'Summary',
+            ongoingGoalsOrCommitments ? '' : 'Ongoing goals or commitments',
+            interactions ? '' : 'Interactions',
+            spatialKnowledge ? '' : 'Spatial knowledge',
+        ].filter(Boolean).join(', ');
+        throw new Error(`Malformed summary response (missing: ${missing || 'unknown'})`);
+    }
+
+    return [
+        `Summary: ${summary}`,
+        `Ongoing goals or commitments: ${ongoingGoalsOrCommitments}`,
+        `Interactions: ${interactions}`,
+        `Spatial knowledge: ${spatialKnowledge}`,
+    ].join('\n');
+}
+
 // ── ChronologicalLog class ──────────────────────────────────
 
 export class ChronologicalLog {
@@ -185,7 +225,13 @@ export class ChronologicalLog {
                 return;
             }
             const data = await res.json();
-            summary = data.text;
+            const rawSummary = String(data.text ?? '').trim();
+            try {
+                summary = parseStructuredSummaryText(rawSummary);
+            } catch (err) {
+                console.warn(`[ChronologicalLog] Structured summary parse failed for ${this.npcName}; using raw text fallback.`, err);
+                summary = rawSummary;
+            }
         } catch (err) {
             console.warn(`[ChronologicalLog] Summarize error for ${this.npcName}:`, err);
             return;

@@ -14,18 +14,20 @@ Turn 2: Ada → (5s) → Bjorn → (5s) → Cora → (5s) → "Turn 2 complete" 
 
 Each NPC turn:
 1. Check sleep status — if sleeping, skip LLM call and decrement remaining turns
-2. Load the NPC's chronological log and goals from disk
+2. Load the NPC's chronological log, goals, and reflection snapshot from disk
 3. Record observations to the NPC's chronological log (position, visible entities)
 4. Build world state from the NPC's perspective
 5. Build memory content from the log (budget-capped at `LOG_CHAR_BUDGET`)
 6. Build goal content via `GoalManager.buildPromptContent()`
-7. Call the LLM for a decision (world state + memory + goals)
-8. Parse the response into directives
-9. Execute goal directives instantly (no budget cost), then up to 3 action commands via `DirectiveExecutor`. Each runs to completion before the next. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
-10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`. Code Forge requests are screened for unsupported capabilities, rejected honestly when needed, and only supported pure-computation functions can become buildings.
-11. Save the log and goals to disk
-12. Summarize old log entries if enough have accumulated
-13. Wait 5 seconds before the next NPC
+7. Refresh reflection if it is stale or due for a periodic refresh, then build reflection content via `ReflectionManager.buildPromptContent()`
+8. Call the LLM for a decision (world state + memory + goals + reflection)
+9. Run the output guard: repair non-command lines, validate strict command-only output, and reprompt once on failure. If still invalid, fallback to `wait()` and record output-format failure for reflection.
+10. Parse the response into directives
+11. Execute goal directives instantly (no budget cost), then up to 3 action commands via `DirectiveExecutor`. Structured success/failure outcomes are fed into reflection state so repeated obstacles can be detected across turns.
+12. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`. Code Forge requests are screened for unsupported capabilities, rejected honestly when needed, and only supported pure-computation functions can become buildings.
+13. Save the log, goals, and reflection snapshot to disk
+14. Summarize old log entries if enough have accumulated
+15. Wait 5 seconds before the next NPC
 
 ## Commands
 
@@ -70,8 +72,9 @@ NPCs can initiate conversations with adjacent entities via `start_conversation_w
 
 1. The target NPC responds via the `CONVERSATION` LLM call
 2. Exchanges alternate until one side calls `end_conversation()` or `MAX_EXCHANGES` (6) is reached
-3. After the conversation ends, `GoalExtractor` analyzes the transcript for new goals
-4. The full transcript is recorded in each NPC's chronological log
+3. After the conversation ends, `GoalExtractor` analyzes the transcript for new goals or goal resolution
+4. If the conversation creates or resolves a goal, the relevant NPC reflection is marked stale and refreshed before the next prompt use
+5. The full transcript is recorded in each NPC's chronological log
 
 The player can also initiate conversations via the dialogue box UI (press **Enter** next to an adjacent NPC).
 
@@ -92,6 +95,19 @@ Each NPC can hold one active goal and one pending goal. Goals are loaded at the 
 - Goal directives (`complete_goal`, `abandon_goal`, `switch_goal`) are processed during directive execution but don't consume action commands
 - When the active goal is completed or abandoned, the pending goal auto-promotes to active
 - Goals are persisted to `data/logs/goals-{Name}.md`
+
+## Reflection
+
+Each NPC also has a separate reflection snapshot in `data/logs/reflection-{Name}.md`.
+
+- Reflection is refreshed every `REFLECTION_EVERY_N_TURNS` turns
+- Repeated failures are detected from structured runtime outcomes such as repeated `no_path` or repeated non-adjacent tool attempts
+- If unknown directives in one turn reach `UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD`, reflection is force-refreshed immediately
+- If the same output-format failure appears on two consecutive turns, it is promoted to the primary active obstacle
+- Completing a goal marks reflection stale
+- Completing a goal also retires active obstacle/strategy into resolved/retired fields and records a short lesson learned
+- Conversations that create or resolve a goal mark reflection stale
+- Reflection is fed into both decision and conversation prompts
 
 See [architecture.md](architecture.md) for goal format and lifecycle details.
 
@@ -117,11 +133,12 @@ A fixed label in the top-left corner shows:
 | `src/game/TurnManager.ts` | Turn loop, sleep tracking, log/goal integration, pause control |
 | `src/game/FunctionBuilderService.ts` | Handles Code Forge validation, rejection feedback, and registration when crafting, modifying, or deleting function tools |
 | `src/game/DirectiveExecutor.ts` | Executes parsed directives — movement, tools, goals, sleep |
-| `src/game/DirectiveParser.ts` | Parses LLM text into typed directive objects |
+| `src/game/DirectiveParser.ts` | Parses LLM text into typed directive objects and provides repair/validation helpers for output guard |
 | `src/game/GameConfig.ts` | Constants: `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`, `NPC_TURN_DELAY` |
 | `src/game/prompts.ts` | LLM prompt configs — models, tokens, system prompts |
 | `src/game/ChronologicalLog.ts` | Per-NPC memory — recording, serialization, summarization |
 | `src/game/GoalManager.ts` | Per-NPC goal persistence — active/pending, promotion, serialization |
+| `src/game/ReflectionManager.ts` | Per-NPC reflection persistence, staleness tracking, refresh triggers |
 | `src/game/GoalExtractor.ts` | Extracts goals from conversation transcripts via LLM |
 | `src/game/ConversationManager.ts` | Multi-turn NPC-NPC and player-NPC conversations |
 | `src/game/entities/NPC.ts` | `walkToAsync()` with optimistic pathfinding |

@@ -4,7 +4,8 @@ import { resolve } from 'path';
 const NPC_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 /**
- * Vite plugin that adds GET/POST /api/logs/:npcName and /api/goals/:npcName
+ * Vite plugin that adds GET/POST /api/logs/:npcName, /api/goals/:npcName,
+ * and /api/reflections/:npcName
  * endpoints for reading and writing per-NPC markdown files under data/logs/.
  */
 export function logIO() {
@@ -23,7 +24,12 @@ export function logIO() {
                 return;
             }
 
-            const filePath = resolve(logsDir, `${prefix === 'logs' ? 'chronological' : 'goals'}-${npcName}.md`);
+            const fileBaseName = prefix === 'logs'
+                ? 'chronological'
+                : prefix === 'goals'
+                    ? 'goals'
+                    : 'reflection';
+            const filePath = resolve(logsDir, `${fileBaseName}-${npcName}.md`);
 
             if (req.method === 'GET') {
                 let content = '';
@@ -74,6 +80,7 @@ export function logIO() {
         configureServer(server) {
             server.middlewares.use(fileHandler('logs'));
             server.middlewares.use(fileHandler('goals'));
+            server.middlewares.use(fileHandler('reflections'));
         },
     };
 }

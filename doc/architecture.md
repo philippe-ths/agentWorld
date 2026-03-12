@@ -12,8 +12,8 @@ src/
     MapData.ts             Procedural 30x30 map (seeded PRNG, grass + water ponds)
     Pathfinder.ts          A* pathfinding on the tile grid
     WorldState.ts          Serializes game state into compact text for LLM consumption
-    LLMService.ts          Client-side LLM caller — sends decision & conversation prompts, logs I/O
-    DirectiveParser.ts     Parses LLM text responses into typed directive objects
+    LLMService.ts          Client-side LLM caller — sends decision & conversation prompts with optional reflection context, logs I/O
+    DirectiveParser.ts     Parses LLM text responses into typed directive objects and provides repair/validation helpers for output guard
     DirectiveExecutor.ts   Executes parsed directives — movement, tools, goals, sleep
     TurnManager.ts         Orchestrates NPC turn loop, sleep tracking, pause/resume
     FunctionBuilderService.ts Handles Code Forge validation, rejection feedback, and registration for LLM-generated code functions
@@ -24,6 +24,7 @@ src/
     ConversationManager.ts Manages NPC-NPC and player-NPC conversations via LLM
     GoalManager.ts         Per-NPC goal persistence — active/pending goals, promotion, serialization
     GoalExtractor.ts       Extracts new goals from conversation transcripts via LLM
+    ReflectionManager.ts   Per-NPC reflection persistence, staleness tracking, refresh triggers
     ToolBuilding.ts        Interface for interactive building objects (tools)
     ToolRegistry.ts        Registry mapping interactive building objects (tools) to their execution handlers
     ToolService.ts         Web search, structured code generation, sandboxed execution, and function persistence endpoints
@@ -31,6 +32,11 @@ src/
     FunctionBuilderService.test.ts Code Forge rejection-path coverage for create/update flows
     PersistedFunctionAudit.test.ts Startup cleanup coverage for unsupported saved functions
     validation.test.ts     Coverage for valid function specs and structured rejections
+    ChronologicalLog.test.ts Chronological log coverage
+    DirectiveParser.test.ts Directive parsing and repair/validation coverage
+    GoalExtractor.test.ts  Goal extraction coverage
+    LLMService.test.ts     LLM service coverage (decide/converse with reflection)
+    ReflectionManager.test.ts Reflection manager coverage
     entities/
       Entity.ts            Abstract base — sprite, tile movement, name label, sleep visuals
       Player.ts            Keyboard-controlled entity (arrows / WASD)
@@ -46,7 +52,7 @@ vite/
   config.dev.mjs           Dev config — includes all server plugins
   config.prod.mjs          Production build config (static only, no API plugins)
   anthropic-proxy.mjs      Vite plugin — proxies /api/chat to Anthropic API with fallback model chain
-  log-io.mjs               Vite plugin — reads/writes per-NPC log & goal .md files
+  log-io.mjs               Vite plugin — reads/writes per-NPC log, goal & reflection .md files
   search-proxy.mjs         Vite plugin — proxies /api/search to Tavily Search API
   code-executor.mjs        Vite plugin — sandboxed JS execution via /api/execute (VM, 1s timeout)
   functions-io.mjs         Vite plugin — CRUD for NPC-created function records via /api/functions

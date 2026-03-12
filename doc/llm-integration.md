@@ -2,17 +2,17 @@
 
 ## Overview
 
-Each NPC's turn is driven by Anthropic Claude. The game sends the current world state, memory, and goals to the LLM and receives back a list of commands to execute. NPCs can also converse with each other and the player, with goals extracted from conversations automatically.
+Each NPC's turn is driven by Anthropic Claude. The game sends the current world state, memory, goals, and reflection to the LLM and receives back a list of commands to execute. NPCs can also converse with each other and the player, with goals extracted from conversations automatically.
 
 ## Flow
 
 ```
-NPC Turn → load log & goals → build world state → POST /api/chat → parse directives → execute commands → save log & goals
+NPC Turn → load log, goals & reflection → build world state → POST /api/chat → parse directives → execute commands → save log, goals & reflection
 ```
 
 ## Centralized Configuration
 
-LLM prompt configs live in `src/game/prompts.ts`. Each of the five LLM calls has its own `PromptConfig` object:
+LLM prompt configs live in `src/game/prompts.ts`. Each of the seven LLM calls has its own `PromptConfig` object:
 
 ```typescript
 interface PromptConfig {
@@ -22,19 +22,19 @@ interface PromptConfig {
 }
 ```
 
-The five configs are: `DECISION`, `CONVERSATION`, `SUMMARIZE`, `GOAL_EXTRACTION`, `CODE_GENERATION`.
+The seven configs are: `DECISION`, `CONVERSATION`, `SUMMARIZE`, `GOAL_EXTRACTION`, `CODE_GENERATION`, `REFLECTION`, `LESSON_LEARNED`.
 
 Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`) and gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`) live in `src/game/GameConfig.ts`.
 
-## Five LLM Calls
+## Seven LLM Calls
 
 ### 1. Decision (`DECISION`)
 
 Used by `LLMService.decide()` each NPC turn. The system prompt defines the NPC's role, available commands, and goal/conversation directives.
 
-**Model:** Opus | **Max tokens:** 256
+**Model:** Opus | **Max tokens:** 320
 
-**Context sent:** memory (chronological log), active/pending goals, world state (map + entity positions + buildings).
+**Context sent:** memory (chronological log), active/pending goals, reflection, world state (map + entity positions + buildings).
 
 ### 2. Conversation (`CONVERSATION`)
 
@@ -42,13 +42,13 @@ Used by `LLMService.converse()` during multi-turn dialogue. The system prompt in
 
 **Model:** Opus | **Max tokens:** 512
 
-**Context sent:** memory, world state, full conversation history (as alternating user/assistant messages).
+**Context sent:** memory, reflection, world state, full conversation history (as alternating user/assistant messages).
 
 ### 3. Summarization (`SUMMARIZE`)
 
 Used by `ChronologicalLog.maybeSummarize()` to compress old log entries. The system prompt instructs the LLM to write a first-person summary preserving key locations, events, and conversations.
 
-**Model:** Haiku | **Max tokens:** 512
+**Model:** Haiku | **Max tokens:** 384
 
 **Context sent:** oldest unsummarized chronological log entries.
 
@@ -67,6 +67,22 @@ Used by `ToolService.generateFunctionSpec()` (working alongside `validation.ts`)
 **Model:** Sonnet | **Max tokens:** 512
 
 **Context sent:** natural-language description, optionally existing function code + change description.
+
+### 6. Reflection (`REFLECTION`)
+
+Used by `ReflectionManager.refreshIfStale()` to update the NPC's compact reflection state. The system prompt instructs the LLM to maintain a structured reflection record with obstacle/strategy lifecycle fields.
+
+**Model:** Sonnet | **Max tokens:** 256
+
+**Context sent:** trigger reasons, world state, chronological memory, current goals, recent failure/success events. The system prompt is parameterized with the NPC's name via `buildSystem(npcName)`.
+
+### 7. Lesson Learned (`LESSON_LEARNED`)
+
+Used by `ReflectionManager.generateCompletionLesson()` after a goal is completed. The system prompt instructs the LLM to write a short, reusable lesson learned from the successful goal completion.
+
+**Model:** Sonnet | **Max tokens:** 128
+
+**Context sent:** goal completion context, memory, world state. The system prompt is parameterized with the NPC's name via `buildSystem(npcName)`.
 
 Supported Code Forge work is limited to pure synchronous computation inside the sandbox. Unsupported capabilities include:
 
@@ -136,7 +152,7 @@ The browser calls API endpoints on the Vite dev server. In production builds, no
 
 ### LLM Proxy (`POST /api/chat`)
 
-The `anthropic-proxy.mjs` plugin forwards requests to the Anthropic Messages API. It handles all five LLM calls through this single endpoint. If a model returns 404, the proxy automatically retries with fallback models.
+The `anthropic-proxy.mjs` plugin forwards requests to the Anthropic Messages API. It handles all seven LLM calls through this single endpoint. If a model returns 404, the proxy automatically retries with fallback models.
 
 **Request body:**
 ```json
@@ -226,11 +242,11 @@ Before directives are executed, decision output goes through a hard guard:
 | Model (summarize) | Haiku | `src/game/prompts.ts` → `SUMMARIZE` |
 | Model (goal extraction) | Sonnet | `src/game/prompts.ts` → `GOAL_EXTRACTION` |
 | Model (code generation) | Sonnet | `src/game/prompts.ts` → `CODE_GENERATION` |
-| Max tokens (decision) | 256 | `src/game/prompts.ts` → `DECISION` |
+| Max tokens (decision) | 320 | `src/game/prompts.ts` → `DECISION` |
 | Max tokens (conversation) | 512 | `src/game/prompts.ts` → `CONVERSATION` |
 | Max tokens (reflection) | 256 | `src/game/prompts.ts` → `REFLECTION` |
 | Max tokens (lesson learned) | 128 | `src/game/prompts.ts` → `LESSON_LEARNED` |
-| Max tokens (summarize) | 512 | `src/game/prompts.ts` → `SUMMARIZE` |
+| Max tokens (summarize) | 384 | `src/game/prompts.ts` → `SUMMARIZE` |
 | Max tokens (goal extraction) | 256 | `src/game/prompts.ts` → `GOAL_EXTRACTION` |
 | Max tokens (code generation) | 512 | `src/game/prompts.ts` → `CODE_GENERATION` |
 | Commands per turn | 3 | `src/game/GameConfig.ts` → `NPC_COMMANDS_PER_TURN` |

@@ -28,7 +28,7 @@ NPC A emits start_conversation_with(B, opening)
   → Turn system resumes
 ```
 
-Both NPCs receive their own world state and memory alongside the conversation history when generating each reply.
+Both NPCs receive their own world state, memory, and reflection alongside the conversation history when generating each reply.
 
 ### Exchange Limit
 
@@ -60,7 +60,7 @@ Player presses Enter next to NPC
   → Turn system resumes
 ```
 
-The NPC receives its world state, memory, and the full conversation history each time it responds. It uses the `CONVERSATION` prompt config from `prompts.ts` — a dedicated prompt that instructs the NPC to be concise, exchange useful information, and end the conversation when it has nothing important to say.
+The NPC receives its world state, memory, reflection, and the full conversation history each time it responds. It uses the `CONVERSATION` prompt config from `prompts.ts` — a dedicated prompt that instructs the NPC to be concise, exchange useful information, and end the conversation when it has nothing important to say.
 
 ### Dialogue Box
 
@@ -93,7 +93,7 @@ These are available inside the conversation loop (via the `CONVERSATION` prompt 
 
 ## Conversation System Prompt
 
-During a conversation, NPCs use the `CONVERSATION` prompt config from `src/game/prompts.ts` (separate from the normal `DECISION` prompt). The prompt instructs the NPC to respond in character, be concise, exchange useful information, and end the conversation when it has nothing important to say.
+During a conversation, NPCs use the `CONVERSATION` prompt config from `src/game/prompts.ts` (separate from the normal `DECISION` prompt). The prompt instructs the NPC to respond in character, be concise, exchange useful information, and end the conversation when it has nothing important to say. Each NPC's reflection snapshot is also injected into the conversation context so learned strategies carry over into dialogue.
 
 ## Validation Rules
 
@@ -143,5 +143,6 @@ For NPC-to-NPC conversations, both NPCs get the transcript in their logs. For pl
 | `src/game/LLMService.ts` | `converse()` method for conversation LLM calls |
 | `src/game/prompts.ts` | `CONVERSATION` prompt config (model, tokens, system prompt) |
 | `src/game/GoalExtractor.ts` | Extracts goals from conversation transcripts via LLM |
+| `src/game/ReflectionManager.ts` | Per-NPC reflection persistence — refreshed after conversation goal changes |
 | `src/game/DirectiveParser.ts` | Parses `start_conversation_with` and `end_conversation` directives |
 | `src/game/TurnManager.ts` | Conversation pause/resume, player interrupt entry point |

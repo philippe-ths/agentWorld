@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { repairDirectiveOutput, validateDirectiveOutput } from './DirectiveParser';
+import { parseDirectives, repairDirectiveOutput, validateDirectiveOutput } from './DirectiveParser';
 
 describe('DirectiveParser guard helpers', () => {
     it('repairs output by removing non-command lines', () => {
@@ -51,5 +51,21 @@ describe('DirectiveParser guard helpers', () => {
 
         expect(repaired.removedLines).toEqual([]);
         expect(repaired.reasoning).toBe('My current goal is complete.');
+    });
+});
+
+describe('parseDirectives', () => {
+    it('skips REASONING and ACTIONS headers without flagging unknown', () => {
+        const directives = parseDirectives([
+            'REASONING: I should move next to Bjorn.',
+            'ACTIONS:',
+            'move_to(12,8)',
+            'start_conversation_with(Bjorn, I found the answer)',
+        ].join('\n'));
+
+        expect(directives).toHaveLength(2);
+        expect(directives[0]).toEqual({ type: 'move_to', x: 12, y: 8 });
+        expect(directives[1]).toEqual({ type: 'start_conversation_with', targetName: 'Bjorn', message: 'I found the answer' });
+        expect(directives.every(d => d.type !== 'unknown')).toBe(true);
     });
 });

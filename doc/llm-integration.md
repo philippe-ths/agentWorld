@@ -111,7 +111,17 @@ The full rejection chain is:
 
 ## Directives
 
-The LLM responds with commands, one per line:
+The decision LLM responds in a structured format with a reasoning line followed by action commands:
+
+```
+REASONING: one short sentence explaining the plan for this turn.
+ACTIONS:
+<commands, one per line>
+```
+
+The `REASONING:` line is extracted and recorded in the NPC's chronological log. The `ACTIONS:` header and `REASONING:` line are silently skipped by `parseDirectives` — only the command lines below `ACTIONS:` are parsed into directives.
+
+Available directives:
 
 | Directive | Description | Counts toward limit |
 |-----------|-------------|:---:|
@@ -155,7 +165,7 @@ The `anthropic-proxy.mjs` plugin forwards requests to the Anthropic Messages API
 **Response:**
 ```json
 {
-  "text": "move_to(12,8)\nstart_conversation_with(Bjorn, Hello!)\nwait()"
+  "text": "REASONING: I should go talk to Bjorn.\nACTIONS:\nmove_to(12,8)\nstart_conversation_with(Bjorn, Hello!)"
 }
 ```
 

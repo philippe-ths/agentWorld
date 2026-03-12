@@ -159,7 +159,9 @@ Six LLM calls go through `/api/chat`, each with its own prompt config from `prom
 | `abandon_goal()` | Give up on the active goal | No |
 | `switch_goal()` | Abandon active goal and promote pending goal | No |
 
-Execution is handled by `DirectiveExecutor`. Unknown lines are logged as warnings.
+The decision prompt requires a structured `REASONING:` / `ACTIONS:` format. The `REASONING:` line is extracted by `repairDirectiveOutput` and recorded in the NPC's log; both `REASONING:` and `ACTIONS:` headers are silently skipped by `parseDirectives`. Remaining unknown lines are logged as warnings.
+
+Execution is handled by `DirectiveExecutor`.
 
 ### Error Handling
 

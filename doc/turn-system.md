@@ -21,8 +21,8 @@ Each NPC turn:
 6. Build goal content via `GoalManager.buildPromptContent()`
 7. Refresh reflection if it is stale or due for a periodic refresh, then build reflection content via `ReflectionManager.buildPromptContent()`
 8. Call the LLM for a decision (world state + memory + goals + reflection)
-9. Run the output guard: repair non-command lines, validate strict command-only output, and reprompt once on failure. If still invalid, fallback to `wait()` and record output-format failure for reflection.
-10. Parse the response into directives
+9. Run the output guard: extract the `REASONING:` line, strip the `ACTIONS:` header, repair any remaining non-command lines, validate strict command-only output, and reprompt once on failure. If still invalid, fallback to `wait()` and record output-format failure for reflection.
+10. Parse the response into directives (the parser also silently skips any `REASONING:`/`ACTIONS:` lines so they are never flagged as unknown)
 11. Execute goal directives instantly (no budget cost), then up to 3 action commands via `DirectiveExecutor`. Structured success/failure outcomes are fed into reflection state so repeated obstacles can be detected across turns.
 12. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`. Code Forge requests are screened for unsupported capabilities, rejected honestly when needed, and only supported pure-computation functions can become buildings.
 13. Save the log, goals, and reflection snapshot to disk
@@ -47,7 +47,7 @@ Each NPC gets a budget of **3 action commands per turn** (`NPC_COMMANDS_PER_TURN
 | `complete_goal()` | Mark the active goal as done | No |
 | `abandon_goal()` | Give up on the active goal | No |
 | `switch_goal()` | Abandon active, promote pending to active | No |
-| *(unknown)* | If an unparseable or misspelled line is detected, it is intercepted and explicitly logged as an error to the NPC so they can correct themselves. | Yes |
+| *(unknown)* | If an unparseable or misspelled line is detected (excluding `REASONING:` and `ACTIONS:` headers which are silently skipped), it is intercepted and explicitly logged as an error to the NPC so they can correct themselves. | Yes |
 
 If the LLM returns more than 3 action commands, the extras are silently dropped.
 

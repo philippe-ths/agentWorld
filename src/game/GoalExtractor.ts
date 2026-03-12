@@ -8,6 +8,14 @@ function formatTranscript(history: ConversationMessage[]): string {
 }
 
 const NONE_RE = /^none\(\s*\)$/m;
+const COMPLETE_RE = /^complete_current_goal\(\s*\)$/m;
+
+export type GoalExtractionResult =
+    | { kind: 'none' }
+    | { kind: 'duplicate'; goal: Goal }
+    | { kind: 'activated'; goal: Goal }
+    | { kind: 'pending'; goal: Goal }
+    | { kind: 'completed'; completedGoal: string; promotedGoal: Goal | null };
 
 function parseGoalFromResponse(text: string): Goal | null {
     const normalized = text.replace(/\r\n?/g, '\n').trim();
@@ -55,7 +63,7 @@ export async function extractGoal(
     history: ConversationMessage[],
     worldState: string,
     goalManager: GoalManager,
-): Promise<void> {
+): Promise<GoalExtractionResult> {
     const system = GOAL_EXTRACTION.buildSystem(npcName);
     const currentGoals = goalManager.buildPromptContent();
     const transcript = formatTranscript(history);
@@ -75,12 +83,12 @@ export async function extractGoal(
         });
     } catch (err) {
         console.error(`%c[GoalExtractor] Network error for ${npcName}`, 'color: #ff4444', err);
-        return;
+        return { kind: 'none' };
     }
 
     if (!response.ok) {
         console.error(`%c[GoalExtractor] API error for ${npcName}: HTTP ${response.status}`, 'color: #ff4444');
-        return;
+        return { kind: 'none' };
     }
 
     const data = await response.json();
@@ -90,20 +98,31 @@ export async function extractGoal(
     console.log(text);
     console.groupEnd();
 
+    const normalized = text.replace(/\r\n?/g, '\n').trim();
+    if (COMPLETE_RE.test(normalized)) {
+        const result = goalManager.completeGoal();
+        if (!result) return { kind: 'none' };
+        await goalManager.save();
+        return { kind: 'completed', completedGoal: result.completed, promotedGoal: result.promoted };
+    }
+
     const goal = parseGoalFromResponse(text);
-    if (!goal) return;
+    if (!goal) return { kind: 'none' };
 
     const active = goalManager.getActiveGoal();
     const pending = goalManager.getPendingGoal();
 
     // Skip if the extracted goal duplicates the active or pending goal
-    if (active && active.goal.toLowerCase() === goal.goal.toLowerCase()) return;
-    if (pending && pending.goal.toLowerCase() === goal.goal.toLowerCase()) return;
+    if (active && active.goal.toLowerCase() === goal.goal.toLowerCase()) return { kind: 'duplicate', goal };
+    if (pending && pending.goal.toLowerCase() === goal.goal.toLowerCase()) return { kind: 'duplicate', goal };
 
     if (!active) {
         goalManager.setActiveGoal(goal);
+        await goalManager.save();
+        return { kind: 'activated', goal };
     } else {
         goalManager.setPendingGoal(goal);
+        await goalManager.save();
+        return { kind: 'pending', goal };
     }
-    await goalManager.save();
 }

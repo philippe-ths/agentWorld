@@ -187,23 +187,58 @@ Success: Successfully delivering the message to Cora
 
 Goal directives (`complete_goal`, `abandon_goal`, `switch_goal`) let NPCs manage their goals during turns without consuming action commands.
 
+The same extraction pass can now also return `complete_current_goal()` when a conversation clearly resolves the NPC's current active goal.
+
+## Reflection
+
+Each NPC has a separate reflection snapshot stored at `data/logs/reflection-{Name}.md`. Reflection is not a second chronological log; it is a compact working summary with lifecycle fields including repeated obstacle, active obstacle, resolved obstacle, current strategy, retired strategy, completion lesson, confidence, and a stale flag.
+
+Reflection refresh is triggered:
+
+- Every 5 turns (`REFLECTION_EVERY_N_TURNS`)
+- After repeated structured failure outcomes such as repeated `move_to` path failures or repeated non-adjacent tool attempts
+- Immediately when unknown directives in one turn reach `UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD`
+- As a primary obstacle when the same output-format failure occurs on consecutive turns
+- After `complete_goal()`
+- After a conversation that creates or resolves a goal
+
+When reflection is stale, `ReflectionManager.refreshIfStale()` calls the `REFLECTION` prompt with the current world state, memory, goals, trigger summary, and recent structured outcomes. The resulting reflection is fed into both `LLMService.decide()` and `LLMService.converse()` as a separate prompt block.
+
+On goal completion, `ReflectionManager.generateCompletionLesson()` runs a short lesson prompt to capture a reusable success insight and prevent stale tactical residue from lingering as active guidance.
+
+## Output Guard
+
+Before directives are executed, decision output goes through a hard guard:
+
+- Repair pass strips non-command lines
+- Strict validator rejects malformed directive output
+- One reprompt is issued (`OUTPUT_GUARD_REPROMPT_ATTEMPTS = 1`) if validation fails
+- If still invalid, execution falls back to `wait()` and records an output-format failure into reflection memory
+
 ## Configuration
 
 | Setting | Value | Location |
 |---------|-------|----------|
 | Model (decision) | Opus | `src/game/prompts.ts` → `DECISION` |
 | Model (conversation) | Opus | `src/game/prompts.ts` → `CONVERSATION` |
+| Model (reflection) | Sonnet | `src/game/prompts.ts` → `REFLECTION` |
+| Model (lesson learned) | Sonnet | `src/game/prompts.ts` → `LESSON_LEARNED` |
 | Model (summarize) | Haiku | `src/game/prompts.ts` → `SUMMARIZE` |
 | Model (goal extraction) | Sonnet | `src/game/prompts.ts` → `GOAL_EXTRACTION` |
 | Model (code generation) | Sonnet | `src/game/prompts.ts` → `CODE_GENERATION` |
 | Max tokens (decision) | 256 | `src/game/prompts.ts` → `DECISION` |
 | Max tokens (conversation) | 512 | `src/game/prompts.ts` → `CONVERSATION` |
+| Max tokens (reflection) | 256 | `src/game/prompts.ts` → `REFLECTION` |
+| Max tokens (lesson learned) | 128 | `src/game/prompts.ts` → `LESSON_LEARNED` |
 | Max tokens (summarize) | 512 | `src/game/prompts.ts` → `SUMMARIZE` |
 | Max tokens (goal extraction) | 256 | `src/game/prompts.ts` → `GOAL_EXTRACTION` |
 | Max tokens (code generation) | 512 | `src/game/prompts.ts` → `CODE_GENERATION` |
 | Commands per turn | 3 | `src/game/GameConfig.ts` → `NPC_COMMANDS_PER_TURN` |
 | Delay between turns | 5 seconds | `src/game/GameConfig.ts` → `NPC_TURN_DELAY` |
 | Summarize every N turns | 5 | `src/game/GameConfig.ts` → `SUMMARIZE_EVERY_N_TURNS` |
+| Reflect every N turns | 5 | `src/game/GameConfig.ts` → `REFLECTION_EVERY_N_TURNS` |
+| Unknown trigger threshold | 2 | `src/game/GameConfig.ts` → `UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD` |
+| Output guard reprompts | 1 | `src/game/GameConfig.ts` → `OUTPUT_GUARD_REPROMPT_ATTEMPTS` |
 | Log character budget | 4000 | `src/game/GameConfig.ts` → `LOG_CHAR_BUDGET` |
 | Max conversation exchanges | 6 | `src/game/GameConfig.ts` → `MAX_EXCHANGES` |
 | Sleep duration | 10 turns | `src/game/GameConfig.ts` → `SLEEP_TURNS` |
@@ -232,5 +267,7 @@ All prompts and responses are logged to the browser console:
 NPCs have persistent memory via chronological log files stored at `data/logs/chronological-{Name}.md`. Each turn, the log records the NPC's position, visible entities, executed actions, and conversation transcripts. Old entries are periodically summarized into compressed paragraphs.
 
 At decision time, the log content is included in the prompt as a prior conversation turn (separate from the world state). The memory is capped at 4000 characters — the oldest summaries are dropped first if over budget, giving NPCs detailed recent memory and compressed older memory.
+
+Reflection is injected separately from chronological memory so recent strategic adjustments stay visible even when older log summaries are dropped for budget reasons.
 
 See [architecture.md](architecture.md) for the full log format and summarization details.

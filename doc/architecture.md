@@ -55,6 +55,7 @@ data/
   logs/                    Per-NPC chronological log and goal files (generated at runtime)
     chronological-{Name}.md
     goals-{Name}.md
+    reflection-{Name}.md
   functions/               NPC-created function records (JSON, generated at runtime)
     {function_name}.json
 ```
@@ -87,18 +88,20 @@ Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, s
 `TurnManager` runs an async loop that cycles through NPCs sequentially (Ada → Bjorn → Cora). For each NPC's turn:
 
 1. Check sleep status — if sleeping, skip the LLM call and decrement remaining sleep turns
-2. Load the NPC's chronological log and goals from disk
+2. Load the NPC's chronological log, goals, and reflection snapshot from disk
 3. Record observations to the log (position, visible entities)
 4. Build world state text via `WorldState.buildWorldState()`
 5. Build memory content from the log via `ChronologicalLog.buildPromptContent()`
 6. Build goal content via `GoalManager.buildPromptContent()`
-7. Send world state + memory + goals to Claude via `LLMService.decide()`
-8. Parse response into directives via `DirectiveParser.parseDirectives()`
-9. Execute goal directives instantly (don't count toward budget), then up to 3 action directives via `DirectiveExecutor`. Each runs to completion before the next. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
-10. Handle function directives (`create_function`, `update_function`, `delete_function`) via `TurnManager`, with capability checks and rejection feedback handled by `FunctionBuilderService`
-11. Save the log and goals to disk
-12. Trigger summarization of old entries if enough have accumulated
-13. Wait 5 seconds before the next NPC's turn
+7. Refresh reflection when stale, then build reflection content via `ReflectionManager.buildPromptContent()`
+8. Send world state + memory + goals + reflection to Claude via `LLMService.decide()`
+9. Apply the output guard (repair + strict validation + one reprompt). If still invalid, fall back to `wait()` and record an output-format failure for reflection.
+10. Parse response into directives via `DirectiveParser.parseDirectives()`
+11. Execute goal directives instantly (don't count toward budget), then up to 3 action directives via `DirectiveExecutor`. Structured action outcomes are also fed into reflection state so repeated obstacles can be detected without scraping free-form log text. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
+12. Handle function directives (`create_function`, `update_function`, `delete_function`) via `TurnManager`, with capability checks and rejection feedback handled by `FunctionBuilderService`
+13. Save the log, goals, and reflection snapshot to disk
+14. Trigger summarization of old entries if enough have accumulated
+15. Wait 5 seconds before the next NPC's turn
 
 The player is **not** part of the turn system and can move at any time.
 
@@ -108,7 +111,7 @@ Press **P** to pause/resume the NPC turn loop.
 
 ### Configuration
 
-LLM prompt configs live in `src/game/prompts.ts`. Each of the five LLM calls has its own `PromptConfig` object containing `model`, `maxTokens`, and `buildSystem()`. Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`) and gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`) live in `src/game/GameConfig.ts`.
+LLM prompt configs live in `src/game/prompts.ts`. Each LLM call has its own `PromptConfig` object containing `model`, `maxTokens`, and `buildSystem()`. Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`) and gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `REFLECTION_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`) live in `src/game/GameConfig.ts`.
 
 ### Server Side
 
@@ -121,19 +124,21 @@ Vite server plugins (dev only) expose the following API endpoints:
 | `POST /api/execute` | `code-executor.mjs` | Sandboxed JS execution in VM context (1s timeout) |
 | `GET/POST /api/logs/:name` | `log-io.mjs` | Per-NPC chronological log file I/O |
 | `GET/POST /api/goals/:name` | `log-io.mjs` | Per-NPC goal file I/O |
+| `GET/POST /api/reflections/:name` | `log-io.mjs` | Per-NPC reflection snapshot file I/O |
 | `GET/POST/DELETE /api/functions[/:name]` | `functions-io.mjs` | CRUD for NPC-created function records |
 
 All API keys (`ANTHROPIC_API_KEY`, `TAVILY_API_KEY`) are loaded from `.env` and kept server-side.
 
 ### Client Side
 
-Five LLM calls go through `/api/chat`, each with its own prompt config from `prompts.ts`:
+Six LLM calls go through `/api/chat`, each with its own prompt config from `prompts.ts`:
 
-1. **Decision** (`LLMService.decide()`) — NPC action selection. Context: memory, goals, world state.
-2. **Conversation** (`LLMService.converse()`) — in-character dialogue responses. Context: memory, world state, conversation history.
-3. **Summarization** (`ChronologicalLog.maybeSummarize()`) — compresses old memory entries. Context: oldest chronological log entries.
-4. **Goal extraction** (`GoalExtractor.extractGoal()`) — detects new goals from conversation transcripts. Context: current goals, world state, conversation transcript.
-5. **Code generation** (`ToolService.generateFunctionSpec()`) — generates JS function implementations. Context: description, optional existing code + change description.
+1. **Decision** (`LLMService.decide()`) — NPC action selection. Context: memory, goals, reflection, world state.
+2. **Conversation** (`LLMService.converse()`) — in-character dialogue responses. Context: memory, reflection, world state, conversation history.
+3. **Reflection refresh** (`ReflectionManager.refreshIfStale()`) — updates compact reflection state. Context: triggers, recent failures, recent successes, goals, memory, world state.
+4. **Summarization** (`ChronologicalLog.maybeSummarize()`) — compresses old memory entries. Context: oldest chronological log entries.
+5. **Goal extraction** (`GoalExtractor.extractGoal()`) — detects new goals or resolves the current goal from conversation transcripts. Context: current goals, world state, conversation transcript.
+6. **Code generation** (`ToolService.generateFunctionSpec()`) — generates JS function implementations. Context: description, optional existing code + change description.
 
 ### Directives
 
@@ -203,6 +208,39 @@ Success: Successfully delivering the message to Cora
 ### Goal Manager
 
 `GoalManager` handles serialization to/from Markdown, loading/saving via the log I/O endpoint (`/api/goals/:name`), and goal state transitions (complete, abandon, switch, promote).
+
+## Reflection
+
+Each NPC also has a compact reflection snapshot persisted to `data/logs/reflection-{Name}.md`.
+
+### Reflection Format
+
+```markdown
+## Reflection
+Repeated obstacle: no_path:(12,8) (repeated 2 times)
+Active obstacle: output_format:unknown_directive (consecutive turns)
+Resolved obstacle: no_path:(12,8) (repeated 2 times)
+Recent success pattern: Approaching the Search Terminal before using it works
+Failed assumption: I assumed the north path to the pond was open
+Current strategy: Respond with command lines only and no commentary
+Retired strategy: Try a different route before attempting the pond again
+Completion lesson: Verify placement with precise checks before finalizing output
+Confidence: 3
+Stale reflection flag: no
+Updated turn: 15
+Trigger: repeated_failed_action
+```
+
+Reflection is separate from chronological memory, summaries, and goals. It is refreshed when one of these triggers fires:
+
+- Every `REFLECTION_EVERY_N_TURNS` turns
+- After a repeated failed action detected from structured action outcomes
+- Immediately when unknown directives in one turn reach `UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD`
+- As a primary obstacle when the same output-format failure repeats on consecutive turns
+- After a completed goal
+- After a conversation that creates or resolves a goal
+
+Reflection is injected into both decision and conversation prompts so NPCs can carry a compact strategy signal without bloating the chronological log.
 
 ## World State Format
 
@@ -298,4 +336,4 @@ The log content injected into the prompt is capped at 4000 characters (`LOG_CHAR
 
 ### Persistence
 
-Log and goal files persist across server restarts via the `log-io.mjs` Vite plugin, which provides `GET/POST /api/logs/:name` and `GET/POST /api/goals/:name` endpoints.
+Log, goal, and reflection files persist across server restarts via the `log-io.mjs` Vite plugin, which provides `GET/POST /api/logs/:name`, `GET/POST /api/goals/:name`, and `GET/POST /api/reflections/:name` endpoints.

@@ -4,7 +4,7 @@ applyTo: "**"
 # Coding Standards
 
 ## Branch Discipline
-- Never commit or push directly to `master` or `main`
+- NEVER commit or push directly to `master` or `main`
 - Always work on a feature or fix branch
 
 ## Code Hygiene

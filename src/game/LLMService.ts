@@ -20,12 +20,21 @@ export class LLMService {
         this.turnLabel = turnLabel ?? null;
     }
 
-    async decide(npcName: string, worldState: string, memory?: string, goals?: string): Promise<string> {
+    async decide(
+        npcName: string,
+        worldState: string,
+        memory?: string,
+        goals?: string,
+        reflection?: string,
+        outputGuardFeedback?: string,
+    ): Promise<string> {
         // ── Log prompt ──────────────────────────────────────
         console.group(`%c[LLM] ${npcName}'s prompt`, 'color: #6bc5ff; font-weight: bold');
         console.log('%cSystem:', 'color: #aaa', DECISION.buildSystem());
         if (memory) console.log('%cMemory:', 'color: #c9a0ff', memory);
         if (goals) console.log('%cGoals:', 'color: #ffcc00', goals);
+        if (reflection) console.log('%cReflection:', 'color: #8ee28e', reflection);
+        if (outputGuardFeedback) console.log('%cOutput guard feedback:', 'color: #ffaa00', outputGuardFeedback);
         console.log('%cWorld state:', 'color: #aaa', worldState);
         console.groupEnd();
 
@@ -37,6 +46,14 @@ export class LLMService {
         if (goals) {
             messages.push({ role: 'user', content: `YOUR GOALS:\n${goals}` });
             messages.push({ role: 'assistant', content: 'Understood.' });
+        }
+        if (reflection) {
+            messages.push({ role: 'user', content: `YOUR REFLECTION:\n${reflection}` });
+            messages.push({ role: 'assistant', content: 'Understood.' });
+        }
+        if (outputGuardFeedback) {
+            messages.push({ role: 'user', content: `OUTPUT FORMAT CORRECTION:\n${outputGuardFeedback}` });
+            messages.push({ role: 'assistant', content: 'Understood. I will respond with commands only.' });
         }
         messages.push({ role: 'user', content: worldState });
 
@@ -85,10 +102,15 @@ export class LLMService {
         worldState: string,
         memory: string | undefined,
         conversationHistory: ConversationMessage[],
+        reflection?: string,
     ): Promise<ConversationResponse> {
         const messages: { role: string; content: string }[] = [];
         if (memory) {
             messages.push({ role: 'user', content: `YOUR MEMORY:\n${memory}` });
+            messages.push({ role: 'assistant', content: 'Understood.' });
+        }
+        if (reflection) {
+            messages.push({ role: 'user', content: `YOUR REFLECTION:\n${reflection}` });
             messages.push({ role: 'assistant', content: 'Understood.' });
         }
         messages.push({ role: 'user', content: `WORLD STATE:\n${worldState}` });

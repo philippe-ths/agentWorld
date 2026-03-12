@@ -5,7 +5,8 @@ import { EntityManager } from './entities/EntityManager';
 import { LLMService, ConversationMessage, ConversationResponse } from './LLMService';
 import { ChronologicalLog } from './ChronologicalLog';
 import { GoalManager } from './GoalManager';
-import { extractGoal } from './GoalExtractor';
+import { extractGoal, GoalExtractionResult } from './GoalExtractor';
+import { ReflectionManager } from './ReflectionManager';
 import { buildWorldState } from './WorldState';
 import { ToolRegistry } from './ToolRegistry';
 import { LOG_CHAR_BUDGET, MAX_EXCHANGES, SPEECH_BUBBLE_DURATION } from './GameConfig';
@@ -30,6 +31,7 @@ export class ConversationManager {
     private llm: LLMService;
     private logs: Map<string, ChronologicalLog>;
     private goals: Map<string, GoalManager>;
+    private reflections: Map<string, ReflectionManager>;
     private callbacks: ConversationCallbacks;
     private toolRegistry: ToolRegistry;
     private activeSession: ConversationSession | null = null;
@@ -46,6 +48,7 @@ export class ConversationManager {
         llm: LLMService,
         logs: Map<string, ChronologicalLog>,
         goals: Map<string, GoalManager>,
+        reflections: Map<string, ReflectionManager>,
         callbacks: ConversationCallbacks,
         toolRegistry: ToolRegistry,
     ) {
@@ -53,6 +56,7 @@ export class ConversationManager {
         this.llm = llm;
         this.logs = logs;
         this.goals = goals;
+        this.reflections = reflections;
         this.callbacks = callbacks;
         this.toolRegistry = toolRegistry;
     }
@@ -101,13 +105,17 @@ export class ConversationManager {
         this.activeSession.history.push({ speaker: initiator.name, text: openingMessage });
 
         // Show speech bubble and simultaneously call target's LLM
-        const entities = this.entityManager.getEntities();
-        const targetWorldState = buildWorldState(target, entities, this.toolRegistry);
-        const targetMemory = this.logs.get(target.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
+        const targetContext = await this.buildNpcPromptContext(target, turnNumber);
 
         const [, targetResponse] = await Promise.all([
             this.callbacks.showSpeechBubble(initiator, openingMessage, SPEECH_BUBBLE_DURATION),
-            this.llm.converse(target.name, targetWorldState, targetMemory, this.activeSession.history),
+            this.llm.converse(
+                target.name,
+                targetContext.worldState,
+                targetContext.memory,
+                this.activeSession.history,
+                targetContext.reflection,
+            ),
         ]);
 
         let exchangeCount = 1; // opening message counts as 1
@@ -125,10 +133,13 @@ export class ConversationManager {
         // Alternate back and forth
         while (exchangeCount < MAX_EXCHANGES) {
             // Initiator's turn
-            const initiatorWorldState = buildWorldState(initiator, entities, this.toolRegistry);
-            const initiatorMemory = this.logs.get(initiator.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
+            const initiatorContext = await this.buildNpcPromptContext(initiator, turnNumber);
             const initiatorResponse = await this.llm.converse(
-                initiator.name, initiatorWorldState, initiatorMemory, this.activeSession.history,
+                initiator.name,
+                initiatorContext.worldState,
+                initiatorContext.memory,
+                this.activeSession.history,
+                initiatorContext.reflection,
             );
 
             if (initiatorResponse.type === 'say') {
@@ -143,8 +154,13 @@ export class ConversationManager {
             if (exchangeCount >= MAX_EXCHANGES) break;
 
             // Target's turn
+            const targetContext2 = await this.buildNpcPromptContext(target, turnNumber);
             const targetResponse2 = await this.llm.converse(
-                target.name, targetWorldState, targetMemory, this.activeSession.history,
+                target.name,
+                targetContext2.worldState,
+                targetContext2.memory,
+                this.activeSession.history,
+                targetContext2.reflection,
             );
 
             if (targetResponse2.type === 'say') {
@@ -277,10 +293,14 @@ export class ConversationManager {
     }
 
     private async sendPlayerMessageToNpc(npc: NPC): Promise<ConversationResponse> {
-        const entities = this.entityManager.getEntities();
-        const worldState = buildWorldState(npc, entities, this.toolRegistry);
-        const memory = this.logs.get(npc.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
-        return this.llm.converse(npc.name, worldState, memory, this.activeSession!.history);
+        const context = await this.buildNpcPromptContext(npc, this.activeSession!.turnNumber);
+        return this.llm.converse(
+            npc.name,
+            context.worldState,
+            context.memory,
+            this.activeSession!.history,
+            context.reflection,
+        );
     }
 
     private async finishConversation(endedBy: string, playerInvolved = false): Promise<void> {
@@ -312,7 +332,8 @@ export class ConversationManager {
             const goalMgr = this.goals.get(npcName);
             if (goalMgr) {
                 const worldState = buildWorldState(npcEntity, entities, this.toolRegistry);
-                await extractGoal(npcName, session.history, worldState, goalMgr);
+                const result = await extractGoal(npcName, session.history, worldState, goalMgr);
+                await this.applyConversationGoalResult(npcName, npcEntity, result, session.turnNumber);
             }
         } else {
             // NPC-to-NPC: save to both logs and extract goals for both
@@ -329,11 +350,13 @@ export class ConversationManager {
             const targetGoals = this.goals.get(session.target.name);
             if (initiatorGoals) {
                 const ws = buildWorldState(session.initiator, entities, this.toolRegistry);
-                await extractGoal(session.initiator.name, session.history, ws, initiatorGoals);
+                const result = await extractGoal(session.initiator.name, session.history, ws, initiatorGoals);
+                await this.applyConversationGoalResult(session.initiator.name, session.initiator, result, session.turnNumber);
             }
             if (targetGoals) {
                 const ws = buildWorldState(session.target, entities, this.toolRegistry);
-                await extractGoal(session.target.name, session.history, ws, targetGoals);
+                const result = await extractGoal(session.target.name, session.history, ws, targetGoals);
+                await this.applyConversationGoalResult(session.target.name, session.target, result, session.turnNumber);
             }
         }
 
@@ -363,5 +386,66 @@ export class ConversationManager {
         }
 
         return { valid: true, target };
+    }
+
+    private async buildNpcPromptContext(npc: NPC, turnNumber: number): Promise<{
+        worldState: string;
+        memory: string | undefined;
+        reflection: string | undefined;
+    }> {
+        const entities = this.entityManager.getEntities();
+        const worldState = buildWorldState(npc, entities, this.toolRegistry);
+        const memory = this.logs.get(npc.name)?.buildPromptContent(LOG_CHAR_BUDGET) || undefined;
+        const goals = this.goals.get(npc.name)?.buildPromptContent() || '';
+        const reflectionManager = this.reflections.get(npc.name);
+        if (!reflectionManager) {
+            return { worldState, memory, reflection: undefined };
+        }
+
+        await reflectionManager.refreshIfStale(turnNumber, worldState, memory ?? '', goals);
+        return {
+            worldState,
+            memory,
+            reflection: reflectionManager.buildPromptContent() || undefined,
+        };
+    }
+
+    private async applyConversationGoalResult(
+        npcName: string,
+        npc: Entity,
+        result: GoalExtractionResult,
+        turnNumber: number,
+    ): Promise<void> {
+        const reflectionManager = this.reflections.get(npcName);
+        if (!reflectionManager || !(npc instanceof NPC)) return;
+
+        let detail = '';
+        if (result.kind === 'activated') {
+            detail = `Conversation created a new active goal: ${result.goal.goal}`;
+        } else if (result.kind === 'pending') {
+            detail = `Conversation created a pending goal: ${result.goal.goal}`;
+        } else if (result.kind === 'completed') {
+            detail = `Conversation resolved a goal: ${result.completedGoal}`;
+            reflectionManager.markGoalCompleted(turnNumber, result.completedGoal);
+        } else {
+            return;
+        }
+
+        reflectionManager.markConversationGoalChange(turnNumber, detail);
+
+        const context = await this.buildNpcPromptContext(npc, turnNumber);
+        if (result.kind === 'completed') {
+            await reflectionManager.generateCompletionLesson(
+                turnNumber,
+                result.completedGoal,
+                context.memory ?? '',
+                context.worldState,
+            );
+        }
+        const goals = this.goals.get(npcName)?.buildPromptContent() || '';
+        const refreshed = await reflectionManager.refreshIfStale(turnNumber, context.worldState, context.memory ?? '', goals);
+        if (!refreshed) {
+            await reflectionManager.save();
+        }
     }
 }

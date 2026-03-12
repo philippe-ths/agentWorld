@@ -80,6 +80,89 @@ const CREATE_FUNCTION_RE = /^create_function\(\s*"(.+)"\s*,\s*(\d+)\s*,\s*(\d+)\
 const UPDATE_FUNCTION_RE = /^update_function\(\s*"([a-z_][a-z0-9_]*)"\s*,\s*"(.+)"\s*\)$/;
 const DELETE_FUNCTION_RE = /^delete_function\(\s*"([a-z_][a-z0-9_]*)"\s*\)$/;
 
+function isValidDirectiveLine(line: string): boolean {
+    return MOVE_TO_RE.test(line)
+        || WAIT_RE.test(line)
+        || START_CONVO_RE.test(line)
+        || END_CONVO_RE.test(line)
+        || COMPLETE_GOAL_RE.test(line)
+        || ABANDON_GOAL_RE.test(line)
+        || SWITCH_GOAL_RE.test(line)
+        || USE_TOOL_RE.test(line)
+        || SLEEP_RE.test(line)
+        || CREATE_FUNCTION_RE.test(line)
+        || UPDATE_FUNCTION_RE.test(line)
+        || DELETE_FUNCTION_RE.test(line);
+}
+
+export interface RepairDirectivesResult {
+    cleanedText: string;
+    removedLines: string[];
+    reasoning?: string;
+}
+
+export interface ValidateDirectivesResult {
+    isValid: boolean;
+    failureKey?: string;
+    reason?: string;
+}
+
+const REASONING_RE = /^REASONING:\s*(.+)$/i;
+const ACTIONS_HEADER_RE = /^ACTIONS:\s*$/i;
+
+export function repairDirectiveOutput(text: string): RepairDirectivesResult {
+    const cleaned: string[] = [];
+    const removed: string[] = [];
+    let reasoning: string | undefined;
+
+    for (const raw of text.split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+
+        const reasoningMatch = line.match(REASONING_RE);
+        if (reasoningMatch) {
+            reasoning = reasoningMatch[1].trim();
+            continue;
+        }
+
+        if (ACTIONS_HEADER_RE.test(line)) continue;
+
+        if (isValidDirectiveLine(line)) {
+            cleaned.push(line);
+            continue;
+        }
+        removed.push(line);
+    }
+
+    return {
+        cleanedText: cleaned.join('\n'),
+        removedLines: removed,
+        reasoning,
+    };
+}
+
+export function validateDirectiveOutput(text: string): ValidateDirectivesResult {
+    const directives = parseDirectives(text);
+    if (directives.length === 0) {
+        return {
+            isValid: false,
+            failureKey: 'output_format:empty_after_repair',
+            reason: 'No executable directives remained after repair.',
+        };
+    }
+
+    const unknown = directives.find(d => d.type === 'unknown');
+    if (unknown) {
+        return {
+            isValid: false,
+            failureKey: 'output_format:unknown_directive',
+            reason: `Unknown directive remained after repair: "${unknown.line}"`,
+        };
+    }
+
+    return { isValid: true };
+}
+
 export function parseDirectives(text: string): Directive[] {
     const directives: Directive[] = [];
 

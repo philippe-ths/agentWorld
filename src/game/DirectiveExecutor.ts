@@ -83,7 +83,7 @@ export class DirectiveExecutor {
                 console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
                 const result: WalkResult = await npc.walkToAsync({ x: dir.x, y: dir.y });
                 if (result.reached) {
-                    log.recordAction(`I moved to (${npc.tilePos.x},${npc.tilePos.y})`);
+                    log.recordAction(`→ reached (${npc.tilePos.x},${npc.tilePos.y})`);
                     return {
                         shouldStop: false,
                         reflectionEvent: {
@@ -94,7 +94,7 @@ export class DirectiveExecutor {
                         },
                     };
                 } else if (result.reason === 'no_path') {
-                    log.recordAction(`I couldn't find a path to (${dir.x},${dir.y}), I stayed at (${npc.tilePos.x},${npc.tilePos.y})`);
+                    log.recordAction(`→ failed: no path to (${dir.x},${dir.y}), stayed at (${npc.tilePos.x},${npc.tilePos.y})`);
                     return {
                         shouldStop: false,
                         reflectionEvent: {
@@ -105,7 +105,7 @@ export class DirectiveExecutor {
                         },
                     };
                 } else {
-                    log.recordAction(`I tried to reach (${dir.x},${dir.y}) but the path was blocked, I ended up at (${npc.tilePos.x},${npc.tilePos.y})`);
+                    log.recordAction(`→ failed: path blocked, ended up at (${npc.tilePos.x},${npc.tilePos.y})`);
                     return {
                         shouldStop: false,
                         reflectionEvent: {
@@ -120,14 +120,26 @@ export class DirectiveExecutor {
             case 'wait':
                 console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
                 await delay(300);
-                log.recordAction('I waited');
+                log.recordAction('→ waited');
                 return { shouldStop: false };
-            case 'start_conversation_with':
+            case 'start_conversation_with': {
                 console.log(`%c[${npc.name}] start_conversation_with(${dir.targetName}, ${dir.message})`, 'color: #ff9f43');
-                log.recordAction(`I started a conversation with ${dir.targetName}`);
-                await this.conversationManager.startNpcConversation(
+                const convoResult = await this.conversationManager.startNpcConversation(
                     npc, dir.targetName, dir.message, turnNumber,
                 );
+                if (!convoResult.success) {
+                    log.recordAction(`→ failed: ${convoResult.error}`);
+                    return {
+                        shouldStop: false,
+                        reflectionEvent: {
+                            turnNumber,
+                            kind: 'failure',
+                            summary: `Could not start conversation with ${dir.targetName}: ${convoResult.error}`,
+                            obstacleKey: `conversation_failed:${dir.targetName}`,
+                        },
+                    };
+                }
+                log.recordAction(`→ conversation started with ${dir.targetName}`);
                 return {
                     shouldStop: true,
                     reflectionEvent: {
@@ -137,11 +149,12 @@ export class DirectiveExecutor {
                         successPattern: 'Using conversation to gather or hand off information',
                     },
                 };
+            }
             case 'use_tool': {
                 const building = this.toolRegistry.getById(dir.toolId);
                 if (!building) {
                     console.warn(`%c[${npc.name}] use_tool: unknown tool "${dir.toolId}"`, 'color: #ffaa00');
-                    log.recordAction(`I tried to use unknown tool "${dir.toolId}"`);
+                    log.recordAction(`→ failed: unknown tool "${dir.toolId}"`);
                     return {
                         shouldStop: false,
                         reflectionEvent: {
@@ -154,7 +167,7 @@ export class DirectiveExecutor {
                 }
                 if (!isAdjacentToBuilding(npc.tilePos, building)) {
                     console.log(`%c[${npc.name}] use_tool(${dir.toolId}) — not adjacent`, 'color: #ffaa00');
-                    log.recordAction(`I tried to use ${building.displayName} but I'm not close enough — I need to be adjacent to (${building.tile.x},${building.tile.y})`);
+                    log.recordAction(`→ failed: not adjacent to ${building.displayName} at (${building.tile.x},${building.tile.y})`);
                     return {
                         shouldStop: false,
                         reflectionEvent: {
@@ -166,10 +179,9 @@ export class DirectiveExecutor {
                     };
                 }
                 console.log(`%c[${npc.name}] use_tool(${dir.toolId}, "${dir.args}")`, 'color: #6bff6b');
-                log.recordAction(`I used ${building.displayName}: "${dir.args}"`);
                 try {
                     const result = await building.execute(dir.args);
-                    log.recordAction(`Result: ${result}`);
+                    log.recordAction(`→ result: ${result}`);
                     return {
                         shouldStop: true,
                         reflectionEvent: {
@@ -182,7 +194,7 @@ export class DirectiveExecutor {
                 } catch (err) {
                     const msg = err instanceof Error ? err.message : String(err);
                     console.warn(`%c[${npc.name}] use_tool error: ${msg}`, 'color: #ffaa00');
-                    log.recordAction(`The tool execution failed: ${msg}`);
+                    log.recordAction(`→ failed: ${msg}`);
                     return {
                         shouldStop: true,
                         reflectionEvent: {

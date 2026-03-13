@@ -76,18 +76,18 @@ export class ConversationManager {
         targetName: string,
         openingMessage: string,
         turnNumber: number,
-    ): Promise<void> {
+    ): Promise<{ success: boolean; error?: string }> {
         const validation = this.validate(initiator, targetName);
         if (!validation.valid) {
             console.warn(`%c[Conversation] ${validation.error}`, 'color: #ffaa00; font-weight: bold');
-            return;
+            return { success: false, error: validation.error };
         }
         const target = validation.target!;
 
         // If the target is the Player, open dialogue box instead of running LLM loop
         if (target instanceof Player) {
             await this.startNpcToPlayerConversation(initiator, target, openingMessage, turnNumber);
-            return;
+            return { success: true };
         }
 
         this.activeSession = {
@@ -127,7 +127,7 @@ export class ConversationManager {
             exchangeCount++;
         } else {
             await this.finishConversation(target.name);
-            return;
+            return { success: true };
         }
 
         // Alternate back and forth
@@ -148,7 +148,7 @@ export class ConversationManager {
                 exchangeCount++;
             } else {
                 await this.finishConversation(initiator.name);
-                return;
+                return { success: true };
             }
 
             if (exchangeCount >= MAX_EXCHANGES) break;
@@ -169,12 +169,13 @@ export class ConversationManager {
                 exchangeCount++;
             } else {
                 await this.finishConversation(target.name);
-                return;
+                return { success: true };
             }
         }
 
         // Hit exchange cap
         await this.finishConversation('exchange limit');
+        return { success: true };
     }
 
     // ── NPC-to-Player Conversation ──────────────────────────

@@ -70,12 +70,13 @@ describe('FunctionBuilderService', () => {
             'Send an email to the player with today\'s exchange rate',
             5,
             5,
+            1,
         );
 
         expect(toolServiceMocks.generateFunctionSpec).not.toHaveBeenCalled();
         expect(toolServiceMocks.saveFunctionRecord).not.toHaveBeenCalled();
         expect(log.actions).toContain(
-            'Code Forge rejected request: Cannot send emails: sandbox has no network access or mail service access',
+            '→ Code Forge rejected request: Cannot send emails: sandbox has no network access or mail service access',
         );
     });
 
@@ -106,11 +107,12 @@ describe('FunctionBuilderService', () => {
             log as never,
             'sum_values',
             'Fetch live pricing data from an API before calculating the total',
+            1,
         );
 
         expect(toolServiceMocks.saveFunctionRecord).not.toHaveBeenCalled();
         expect(log.actions).toContain(
-            'Code Forge rejected update: Cannot access external APIs or the network: sandbox has no network access',
+            '→ Code Forge rejected update: Cannot access external APIs or the network: sandbox has no network access',
         );
     });
 });

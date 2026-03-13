@@ -213,6 +213,12 @@ export class TurnManager {
             }
 
             directives = parseDirectives(guarded.cleanedResponse);
+
+            // Record the raw actions the NPC chose (before execution outcomes)
+            for (const line of guarded.cleanedResponse.split('\n')) {
+                const trimmed = line.trim();
+                if (trimmed) log.recordAction(trimmed);
+            }
         } catch (err) {
             const msg = (err as Error).message;
             console.error(
@@ -267,22 +273,25 @@ export class TurnManager {
             await this.waitIfConversationPaused();
 
             if (dir.type === 'unknown') {
-                log.recordAction(`I tried to use an unknown command: "${dir.line}"`);
+                log.recordAction(`→ unknown command: "${dir.line}"`);
                 continue;
             }
 
             if (dir.type === 'create_function') {
-                await this.functionBuilder.handleCreateFunction(npc, log, dir.description, dir.x, dir.y);
+                const result = await this.functionBuilder.handleCreateFunction(npc, log, dir.description, dir.x, dir.y, this.turnNumber);
+                if (result.reflectionEvent) reflectionManager.recordEvent(result.reflectionEvent);
                 break;
             }
 
             if (dir.type === 'update_function') {
-                await this.functionBuilder.handleUpdateFunction(npc, log, dir.functionName, dir.changeDescription);
+                const result = await this.functionBuilder.handleUpdateFunction(npc, log, dir.functionName, dir.changeDescription, this.turnNumber);
+                if (result.reflectionEvent) reflectionManager.recordEvent(result.reflectionEvent);
                 break;
             }
 
             if (dir.type === 'delete_function') {
-                await this.functionBuilder.handleDeleteFunction(npc, log, dir.functionName);
+                const result = await this.functionBuilder.handleDeleteFunction(npc, log, dir.functionName, this.turnNumber);
+                if (result.reflectionEvent) reflectionManager.recordEvent(result.reflectionEvent);
                 break;
             }
 
@@ -310,7 +319,7 @@ export class TurnManager {
         if (actionDirectives.some(d => d.type === 'sleep')) {
             if (goalManager.getActiveGoal()) {
                 console.log(`%c[${npc.name}] sleep() rejected — has active goal`, 'color: #ffaa00; font-weight: bold');
-                log.recordAction('I tried to sleep but I have an active goal to work on');
+                log.recordAction('→ sleep rejected: has active goal');
                 reflectionManager.recordEvent({
                     turnNumber: this.turnNumber,
                     kind: 'failure',

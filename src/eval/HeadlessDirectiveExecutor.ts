@@ -1,5 +1,6 @@
 import { HeadlessNPC, WalkResult } from './HeadlessEntity';
 import { HeadlessEntityManager } from './HeadlessEntityManager';
+import { HeadlessConversationManager } from './HeadlessConversationManager';
 import { ChronologicalLog } from '../game/ChronologicalLog';
 import { GoalManager } from '../game/GoalManager';
 import { ToolRegistry } from '../game/ToolRegistry';
@@ -25,9 +26,11 @@ export interface ActionExecutionResult {
  */
 export class HeadlessDirectiveExecutor {
     private toolRegistry: ToolRegistry;
+    private conversationManager: HeadlessConversationManager | null;
 
-    constructor(toolRegistry: ToolRegistry, _entityManager: HeadlessEntityManager) {
+    constructor(toolRegistry: ToolRegistry, _entityManager: HeadlessEntityManager, conversationManager?: HeadlessConversationManager) {
         this.toolRegistry = toolRegistry;
+        this.conversationManager = conversationManager ?? null;
     }
 
     async executeGoal(
@@ -115,13 +118,38 @@ export class HeadlessDirectiveExecutor {
                 return { shouldStop: false };
 
             case 'start_conversation_with': {
-                // In headless eval, conversations are no-ops — NPC notes the attempt
                 if (!isFeatureEnabled('conversations')) {
                     log.recordAction('→ start_conversation_with rejected: conversations are disabled');
                     return { shouldStop: false };
                 }
-                log.recordAction(`→ conversation with ${dir.targetName} skipped (headless mode)`);
-                return { shouldStop: true };
+                if (!this.conversationManager) {
+                    log.recordAction(`→ conversation with ${dir.targetName} skipped (no conversation manager)`);
+                    return { shouldStop: true };
+                }
+                const convoResult = await this.conversationManager.startNpcConversation(
+                    npc, dir.targetName, dir.message, turnNumber,
+                );
+                if (convoResult.success) {
+                    return {
+                        shouldStop: true,
+                        reflectionEvent: {
+                            turnNumber,
+                            kind: 'success',
+                            summary: `Had a conversation with ${dir.targetName}`,
+                            successPattern: `Approaching ${dir.targetName} and starting a conversation`,
+                        },
+                    };
+                }
+                log.recordAction(`→ conversation with ${dir.targetName} failed: ${convoResult.error}`);
+                return {
+                    shouldStop: false,
+                    reflectionEvent: {
+                        turnNumber,
+                        kind: 'failure',
+                        summary: `Could not start conversation with ${dir.targetName}: ${convoResult.error}`,
+                        obstacleKey: `conversation_failed:${dir.targetName}`,
+                    },
+                };
             }
 
             case 'use_tool': {

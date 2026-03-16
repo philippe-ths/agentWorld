@@ -1,4 +1,5 @@
 import { TilePos } from '../game/types';
+import { FeatureKey } from '../game/GameConfig';
 
 // ── Outcomes ─────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ export interface TestScenario {
     id: string;
     targetNpc: 'Ada' | 'Bjorn' | 'Cora';
     maxGlobalTurns: number;
+    features?: Partial<Record<FeatureKey, boolean>>;
     seedChronologicalLog(): Promise<void>;
     checkSuccess(state: EvalGameState): boolean;
     checkAbort?(state: EvalGameState): AbortReason | null;

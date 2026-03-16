@@ -4,6 +4,8 @@
 
 NPCs operate on a sequential turn-based system. The player is **not** part of the turn system and can move freely at any time.
 
+Individual subsystems (goals, reflection, conversations, log summarization, function building, search terminal) can be toggled on or off at runtime via feature flags in `GameConfig.ts`. See [architecture.md](architecture.md#feature-toggles) for details.
+
 ## Turn Loop
 
 ```
@@ -18,42 +20,42 @@ Each NPC turn:
 3. Record observations to the NPC's chronological log (position, visible entities)
 4. Build world state from the NPC's perspective
 5. Build memory content from the log (budget-capped at `LOG_CHAR_BUDGET`)
-6. Build goal content via `GoalManager.buildPromptContent()`
-7. Refresh reflection if it is stale or due for a periodic refresh, then build reflection content via `ReflectionManager.buildPromptContent()`
+6. Build goal content via `GoalManager.buildPromptContent()` *(skipped when `goals` is off)*
+7. Refresh reflection if it is stale or due for a periodic refresh, then build reflection content via `ReflectionManager.buildPromptContent()` *(skipped when `reflection` is off)*
 8. Call the LLM for a decision (world state + memory + goals + reflection)
 9. Run the output guard: extract the `REASONING:` line, strip the `ACTIONS:` header, repair any remaining non-command lines, validate strict command-only output, and reprompt once on failure. If still invalid, fallback to `wait()` and record output-format failure for reflection.
 10. Parse the response into directives (the parser also silently skips any `REASONING:`/`ACTIONS:` lines so they are never flagged as unknown)
 11. Execute goal directives instantly (no budget cost), then up to 3 action commands via `DirectiveExecutor`. Structured success/failure outcomes are fed into reflection state so repeated obstacles can be detected across turns.
 12. Handle function directives (`create_function`, `update_function`, `delete_function`) via `FunctionBuilderService`. Code Forge requests are screened for unsupported capabilities, rejected honestly when needed, and only supported pure-computation functions can become buildings.
 13. Save the log, goals, and reflection snapshot to disk
-14. Summarize old log entries if enough have accumulated
+14. Summarize old log entries if enough have accumulated *(skipped when `logSummarization` is off)*
 15. Wait 5 seconds before the next NPC
 
 ## Commands
 
 Each NPC gets a budget of **3 action commands per turn** (`NPC_COMMANDS_PER_TURN` in `GameConfig.ts`). Each command runs to completion before the next starts.
 
-| Command | Description | Counts toward limit |
-|---------|-------------|:---:|
-| `move_to(x,y)` | Walk the full path tile-by-tile to the target | Yes |
-| `wait()` | Pause for 300ms | Yes |
-| `start_conversation_with(Name, message)` | Initiate dialogue with an adjacent entity (ends turn) | Yes |
-| `end_conversation()` | End the current conversation | Yes |
-| `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes |
-| `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes |
-| `create_function("desc", x, y)` | Create a new function building at Code Forge; unsupported requests are rejected and logged instead of producing a building (ends turn) | Yes |
-| `update_function("name", "change")` | Update an existing function at Code Forge; unsupported changes are rejected and the current function is left unchanged (ends turn) | Yes |
-| `delete_function("name")` | Delete a function building (ends turn) | Yes |
-| `complete_goal()` | Mark the active goal as done | No |
-| `abandon_goal()` | Give up on the active goal | No |
-| `switch_goal()` | Abandon active, promote pending to active | No |
-| *(unknown)* | If an unparseable or misspelled line is detected (excluding `REASONING:` and `ACTIONS:` headers which are silently skipped), it is intercepted and explicitly logged as an error to the NPC so they can correct themselves. | Yes |
+| Command | Description | Counts toward limit | Feature gate |
+|---------|-------------|:---:|:---:|
+| `move_to(x,y)` | Walk the full path tile-by-tile to the target | Yes | — |
+| `wait()` | Pause for 300ms | Yes | — |
+| `start_conversation_with(Name, message)` | Initiate dialogue with an adjacent entity (ends turn) | Yes | `conversations` |
+| `end_conversation()` | End the current conversation | Yes | — |
+| `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes | target building's feature |
+| `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes | — |
+| `create_function("desc", x, y)` | Create a new function building at Code Forge; unsupported requests are rejected and logged instead of producing a building (ends turn) | Yes | `functionBuilding` |
+| `update_function("name", "change")` | Update an existing function at Code Forge; unsupported changes are rejected and the current function is left unchanged (ends turn) | Yes | `functionBuilding` |
+| `delete_function("name")` | Delete a function building (ends turn) | Yes | `functionBuilding` |
+| `complete_goal()` | Mark the active goal as done | No | `goals` |
+| `abandon_goal()` | Give up on the active goal | No | `goals` |
+| `switch_goal()` | Abandon active, promote pending to active | No | `goals` |
+| *(unknown)* | If an unparseable or misspelled line is detected (excluding `REASONING:` and `ACTIONS:` headers which are silently skipped), it is intercepted and explicitly logged as an error to the NPC so they can correct themselves. | Yes | — |
 
 If the LLM returns more than 3 action commands, the extras are silently dropped.
 
 ## Code Forge Outcomes
 
-Function directives end the turn immediately, but they do not always produce a building.
+Function directives end the turn immediately, but they do not always produce a building. The entire Code Forge system is gated by the `functionBuilding` feature toggle — when disabled, all function directives are rejected and the Code Forge building is hidden from the map.
 
 - `create_function(...)` and `update_function(...)` are limited to pure synchronous JavaScript that only performs computation on its inputs.
 - Requests involving email sending, external APIs, network access, filesystem access, database access, or other external side effects are rejected.
@@ -68,7 +70,7 @@ Typical log outcomes include:
 
 ## Conversations
 
-NPCs can initiate conversations with adjacent entities via `start_conversation_with(Name, message)`. The conversation then enters a multi-turn exchange managed by `ConversationManager`:
+NPCs can initiate conversations with adjacent entities via `start_conversation_with(Name, message)`. This directive is gated by the `conversations` feature toggle — when disabled, it is rejected and the NPC's log records the rejection. The conversation then enters a multi-turn exchange managed by `ConversationManager`:
 
 1. The target NPC responds via the `CONVERSATION` LLM call
 2. Exchanges alternate until one side calls `end_conversation()` or `MAX_EXCHANGES` (6) is reached
@@ -90,7 +92,7 @@ NPCs can enter low-power sleep mode via the `sleep()` directive. During sleep:
 
 ## Goals
 
-Each NPC can hold one active goal and one pending goal. Goals are loaded at the start of each turn and saved at the end.
+Each NPC can hold one active goal and one pending goal. Goals are loaded at the start of each turn and saved at the end. The goal system is gated by the `goals` feature toggle — when disabled, `GoalManager` is not created and all goal directives are unavailable. Goals are also effectively off when `conversations` is disabled.
 
 - Goal directives (`complete_goal`, `abandon_goal`, `switch_goal`) are processed during directive execution but don't consume action commands
 - When the active goal is completed or abandoned, the pending goal auto-promotes to active
@@ -98,7 +100,7 @@ Each NPC can hold one active goal and one pending goal. Goals are loaded at the 
 
 ## Reflection
 
-Each NPC also has a separate reflection snapshot in `data/logs/reflection-{Name}.md`.
+Each NPC also has a separate reflection snapshot in `data/logs/reflection-{Name}.md`. The reflection system is gated by the `reflection` feature toggle — when disabled, `ReflectionManager` is not created. Reflection is also effectively off when `goals` or `conversations` is disabled.
 
 - Reflection is refreshed every `REFLECTION_EVERY_N_TURNS` turns
 - Repeated failures are detected from structured runtime outcomes such as repeated `no_path` or repeated non-adjacent tool attempts
@@ -134,7 +136,7 @@ A fixed label in the top-left corner shows:
 | `src/game/FunctionBuilderService.ts` | Handles Code Forge validation, rejection feedback, and registration when crafting, modifying, or deleting function tools |
 | `src/game/DirectiveExecutor.ts` | Executes parsed directives — movement, tools, goals, sleep |
 | `src/game/DirectiveParser.ts` | Parses LLM text into typed directive objects and provides repair/validation helpers for output guard |
-| `src/game/GameConfig.ts` | Constants: `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`, `NPC_TURN_DELAY` |
+| `src/game/GameConfig.ts` | Constants: `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`, `NPC_TURN_DELAY`, feature flags (`FEATURES`, `isFeatureEnabled`) |
 | `src/game/prompts.ts` | LLM prompt configs — models, tokens, system prompts |
 | `src/game/ChronologicalLog.ts` | Per-NPC memory — recording, serialization, summarization |
 | `src/game/GoalManager.ts` | Per-NPC goal persistence — active/pending, promotion, serialization |

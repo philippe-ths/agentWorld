@@ -7,7 +7,7 @@ src/
   main.ts                  Entry point — creates the Phaser game
   game/
     main.ts                Game config & StartGame()
-    GameConfig.ts          Constants, model names, NPC/building definitions, interfaces
+    GameConfig.ts          Constants, model names, NPC/building definitions, feature flags, interfaces
     prompts.ts             LLM prompt configs — PromptConfig interface, per-prompt model/tokens/system
     MapData.ts             Procedural 30x30 map (seeded PRNG, grass + water ponds)
     Pathfinder.ts          A* pathfinding on the tile grid
@@ -26,7 +26,7 @@ src/
     GoalExtractor.ts       Extracts new goals from conversation transcripts via LLM
     ReflectionManager.ts   Per-NPC reflection persistence, staleness tracking, refresh triggers
     ToolBuilding.ts        Interface for interactive building objects (tools)
-    ToolRegistry.ts        Registry mapping interactive building objects (tools) to their execution handlers
+    ToolRegistry.ts        Registry mapping interactive building objects (tools) to their execution handlers; filters by feature flags via getVisible()
     ToolService.ts         Web search, structured code generation, sandboxed execution, and function persistence endpoints
     FunctionCapability.test.ts Capability-screening coverage for unsupported requests and code
     FunctionBuilderService.test.ts Code Forge rejection-path coverage for create/update flows
@@ -98,26 +98,50 @@ Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, s
 3. Record observations to the log (position, visible entities)
 4. Build world state text via `WorldState.buildWorldState()`
 5. Build memory content from the log via `ChronologicalLog.buildPromptContent()`
-6. Build goal content via `GoalManager.buildPromptContent()`
-7. Refresh reflection when stale, then build reflection content via `ReflectionManager.buildPromptContent()`
+6. Build goal content via `GoalManager.buildPromptContent()` *(skipped when `goals` feature is off)*
+7. Refresh reflection when stale, then build reflection content via `ReflectionManager.buildPromptContent()` *(skipped when `reflection` feature is off)*
 8. Send world state + memory + goals + reflection to Claude via `LLMService.decide()`
 9. Apply the output guard (repair + strict validation + one reprompt). If still invalid, fall back to `wait()` and record an output-format failure for reflection.
 10. Parse response into directives via `DirectiveParser.parseDirectives()`
 11. Execute goal directives instantly (don't count toward budget), then up to 3 action directives via `DirectiveExecutor`. Structured action outcomes are also fed into reflection state so repeated obstacles can be detected without scraping free-form log text. Turn-ending directives (`start_conversation_with`, `use_tool`, `sleep`) stop execution immediately.
 12. Handle function directives (`create_function`, `update_function`, `delete_function`) via `TurnManager`, with capability checks and rejection feedback handled by `FunctionBuilderService`
 13. Save the log, goals, and reflection snapshot to disk
-14. Trigger summarization of old entries if enough have accumulated
+14. Trigger summarization of old entries if enough have accumulated *(skipped when `logSummarization` feature is off)*
 15. Wait 5 seconds before the next NPC's turn
 
 The player is **not** part of the turn system and can move at any time.
 
 Press **P** to pause/resume the NPC turn loop.
 
+## Feature Toggles
+
+Subsystems can be enabled or disabled at runtime via the `FEATURES` object in `GameConfig.ts`. Toggle from the browser console: `FEATURES.goals = false`.
+
+| Flag | Default | Controls |
+|------|:-------:|----------|
+| `conversations` | `true` | NPC-to-NPC and player-to-NPC conversations |
+| `goals` | `true` | Goal extraction, tracking, and directives |
+| `reflection` | `true` | Per-NPC reflection refresh and integration |
+| `logSummarization` | `true` | Automatic summarization of old log entries |
+| `functionBuilding` | `true` | Code Forge and NPC-created function buildings |
+| `searchTerminal` | `true` | Search Terminal building |
+
+**Cascade rules** — disabling a parent automatically disables its dependents:
+- `conversations: false` → goals effectively off → reflection effectively off
+- `goals: false` → reflection effectively off
+- `reflection`, `logSummarization`, `functionBuilding`, `searchTerminal` — independent
+
+The `isFeatureEnabled(key)` function resolves cascade dependencies. Gates are applied in `TurnManager`, `ConversationManager`, `DirectiveExecutor`, `GameScene`, `prompts.ts`, `ChronologicalLog`, `ToolRegistry`, and `WorldState`.
+
+The `DECISION` prompt is built dynamically by `DECISION.buildSystem()` — commands, rules, and examples are conditionally included based on which features are active.
+
+Buildings are filtered through `ToolRegistry.getVisible()`, which excludes disabled buildings from the map, NPC world state, and prompt context.
+
 ## LLM Integration
 
 ### Configuration
 
-LLM prompt configs live in `src/game/prompts.ts`. Each LLM call has its own `PromptConfig` object containing `model`, `maxTokens`, and `buildSystem()`. Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`) and gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `REFLECTION_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`) live in `src/game/GameConfig.ts`.
+LLM prompt configs live in `src/game/prompts.ts`. Each LLM call has its own `PromptConfig` object containing `model`, `maxTokens`, and `buildSystem()`. Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`), gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `REFLECTION_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`), and feature flags (`FEATURES`, `isFeatureEnabled`) live in `src/game/GameConfig.ts`.
 
 ### Server Side
 
@@ -178,7 +202,7 @@ LLM errors are handled loudly:
 
 ## Conversations
 
-`ConversationManager` handles multi-turn dialogue between entities. Conversations can be initiated by NPCs (via `start_conversation_with`) or by the player (via the dialogue box UI).
+`ConversationManager` handles multi-turn dialogue between entities. Conversations can be initiated by NPCs (via `start_conversation_with`) or by the player (via the dialogue box UI). The entire conversation system is gated by the `conversations` feature toggle — when disabled, NPC conversation directives are rejected and the player Enter key is blocked.
 
 Each exchange:
 1. Build world state and memory for the responding NPC
@@ -186,7 +210,7 @@ Each exchange:
 3. Parse the response as `say(message)` or `end_conversation()`
 4. Display via speech bubbles
 
-Conversations are capped at `MAX_EXCHANGES` (6) rounds. After a conversation ends, `GoalExtractor.extractGoal()` runs on the transcript to detect new goals for each NPC participant.
+Conversations are capped at `MAX_EXCHANGES` (6) rounds. After a conversation ends, `GoalExtractor.extractGoal()` runs on the transcript to detect new goals for each NPC participant (skipped when the `goals` feature is off).
 
 Conversation transcripts are recorded in the NPC's chronological log for future memory.
 
@@ -194,7 +218,7 @@ See [conversations.md](conversations.md) for the full conversation lifecycle, va
 
 ## Goals
 
-Each NPC can have one **active** goal and one **pending** goal, persisted to `data/logs/goals-{Name}.md`.
+Each NPC can have one **active** goal and one **pending** goal, persisted to `data/logs/goals-{Name}.md`. The goal system is gated by the `goals` feature toggle — when disabled, `GoalManager` is not instantiated and all goal directives are unavailable. Goals are also effectively off when `conversations` is disabled (cascade rule).
 
 ### Goal Format
 
@@ -219,7 +243,7 @@ Success: Successfully delivering the message to Cora
 
 ## Reflection
 
-Each NPC also has a compact reflection snapshot persisted to `data/logs/reflection-{Name}.md`.
+Each NPC also has a compact reflection snapshot persisted to `data/logs/reflection-{Name}.md`. The reflection system is gated by the `reflection` feature toggle — when disabled, `ReflectionManager` is not instantiated. Reflection is also effectively off when `goals` or `conversations` is disabled (cascade rule).
 
 ### Reflection Format
 
@@ -271,18 +295,18 @@ BUILDINGS:
 ACTIONS: move_to(x,y) | wait()
 ```
 
-Entities and buildings are overlaid on the map grid using single characters. When an NPC is adjacent to a tool building, that building's usage instructions are appended to the world state.
+Entities and buildings are overlaid on the map grid using single characters. When an NPC is adjacent to a tool building, that building's usage instructions are appended to the world state. The building list is filtered through `ToolRegistry.getVisible()`, so buildings whose feature toggle is off do not appear in the world state.
 
 ## Buildings & Tools
 
-The game has interactive building objects that NPCs can use by moving adjacent and issuing directives. Buildings are defined in `GameConfig.ts` and managed by `ToolRegistry`.
+The game has interactive building objects that NPCs can use by moving adjacent and issuing directives. Buildings are defined in `GameConfig.ts` and managed by `ToolRegistry`. Each building type has an associated feature toggle — when disabled, the building is hidden from the map, excluded from world state, and its directives are rejected.
 
 ### Built-in Buildings
 
 | Building | Position | Symbol | Description |
 |----------|----------|--------|-------------|
-| Search Terminal | (15,15) | `S` | Searches the web via Tavily API. Use: `use_tool(search_terminal, "query")` |
-| Code Forge | (20,15) | `C` | Creates, updates, or deletes supported pure-computation function buildings. Unsupported requests are rejected. Use: `create_function(...)`, `update_function(...)`, `delete_function(...)` |
+| Search Terminal | (15,15) | `S` | Searches the web via Tavily API. Use: `use_tool(search_terminal, "query")`. Gated by `searchTerminal` feature. |
+| Code Forge | (20,15) | `C` | Creates, updates, or deletes supported pure-computation function buildings. Unsupported requests are rejected. Use: `create_function(...)`, `update_function(...)`, `delete_function(...)`. Gated by `functionBuilding` feature. |
 
 ### NPC-Created Function Buildings
 
@@ -302,7 +326,7 @@ Persisted function records are also audited when the scene starts. Unsupported l
 ### Tool System
 
 - `ToolBuilding` — interface: `id`, `displayName`, `tile`, `symbol`, `description`, `instructions`, `execute(args)`
-- `ToolRegistry` — registers/unregisters buildings, lookup by id or position, adjacency checks
+- `ToolRegistry` — registers/unregisters buildings, lookup by id or position, adjacency checks. `getVisible()` filters buildings based on active feature toggles.
 - `ToolService` — web search (`/api/search`), code generation (`/api/chat`), sandboxed execution (`/api/execute`), function CRUD (`/api/functions`)
 
 ## Sleep

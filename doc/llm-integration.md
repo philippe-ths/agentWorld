@@ -24,13 +24,13 @@ interface PromptConfig {
 
 The seven configs are: `DECISION`, `CONVERSATION`, `SUMMARIZE`, `GOAL_EXTRACTION`, `CODE_GENERATION`, `REFLECTION`, `LESSON_LEARNED`.
 
-Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`) and gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`) live in `src/game/GameConfig.ts`.
+Model constants (`LLM_MODEL_OPUS`, `LLM_MODEL_SONNET`, `LLM_MODEL_HAIKU`), gameplay tuning constants (`SUMMARIZE_EVERY_N_TURNS`, `LOG_CHAR_BUDGET`, `MAX_EXCHANGES`, `NPC_COMMANDS_PER_TURN`, `SLEEP_TURNS`), and feature flags (`FEATURES`, `isFeatureEnabled`) live in `src/game/GameConfig.ts`.
 
 ## Seven LLM Calls
 
 ### 1. Decision (`DECISION`)
 
-Used by `LLMService.decide()` each NPC turn. The system prompt defines the NPC's role, available commands, and goal/conversation directives.
+Used by `LLMService.decide()` each NPC turn. The system prompt is built dynamically by `DECISION.buildSystem()` — commands, rules, job instructions, and examples are conditionally included based on which feature flags are active. When a subsystem is disabled, its related commands and context are omitted from the prompt entirely.
 
 **Model:** Opus | **Max tokens:** 320
 
@@ -139,20 +139,20 @@ The `REASONING:` line is extracted and recorded in the NPC's chronological log. 
 
 Available directives:
 
-| Directive | Description | Counts toward limit |
-|-----------|-------------|:---:|
-| `move_to(x,y)` | Walk to tile (x,y), full path step-by-step | Yes |
-| `wait()` | Do nothing for this action | Yes |
-| `start_conversation_with(Name, message)` | Initiate dialogue with an adjacent entity (ends turn) | Yes |
-| `end_conversation()` | End the current conversation | Yes |
-| `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes |
-| `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes |
-| `create_function("desc", x, y)` | Attempt to create a new function building at Code Forge; unsupported requests are rejected and logged (ends turn) | Yes |
-| `update_function("name", "change")` | Attempt to update an existing function; unsupported changes are rejected and logged (ends turn) | Yes |
-| `delete_function("name")` | Delete a function building (ends turn) | Yes |
-| `complete_goal()` | Mark the active goal as done | No |
-| `abandon_goal()` | Give up on the active goal | No |
-| `switch_goal()` | Abandon active, promote pending to active | No |
+| Directive | Description | Counts toward limit | Feature gate |
+|-----------|-------------|:---:|:---:|
+| `move_to(x,y)` | Walk to tile (x,y), full path step-by-step | Yes | — |
+| `wait()` | Do nothing for this action | Yes | — |
+| `start_conversation_with(Name, message)` | Initiate dialogue with an adjacent entity (ends turn) | Yes | `conversations` |
+| `end_conversation()` | End the current conversation | Yes | — |
+| `use_tool(tool_id, "args")` | Use an adjacent tool building (ends turn) | Yes | target building's feature |
+| `sleep()` | Enter low-power mode for `SLEEP_TURNS` turns (ends turn) | Yes | — |
+| `create_function("desc", x, y)` | Attempt to create a new function building at Code Forge; unsupported requests are rejected and logged (ends turn) | Yes | `functionBuilding` |
+| `update_function("name", "change")` | Attempt to update an existing function; unsupported changes are rejected and logged (ends turn) | Yes | `functionBuilding` |
+| `delete_function("name")` | Delete a function building (ends turn) | Yes | `functionBuilding` |
+| `complete_goal()` | Mark the active goal as done | No | `goals` |
+| `abandon_goal()` | Give up on the active goal | No | `goals` |
+| `switch_goal()` | Abandon active, promote pending to active | No | `goals` |
 
 Each action command runs to completion before the next one starts. Up to 3 action commands per turn; goal directives don't count toward this limit.
 
@@ -268,6 +268,12 @@ Before directives are executed, decision output goes through a hard guard:
 | Log character budget | 4000 | `src/game/GameConfig.ts` → `LOG_CHAR_BUDGET` |
 | Max conversation exchanges | 6 | `src/game/GameConfig.ts` → `MAX_EXCHANGES` |
 | Sleep duration | 10 turns | `src/game/GameConfig.ts` → `SLEEP_TURNS` |
+| Feature: conversations | `true` | `src/game/GameConfig.ts` → `FEATURES.conversations` |
+| Feature: goals | `true` | `src/game/GameConfig.ts` → `FEATURES.goals` |
+| Feature: reflection | `true` | `src/game/GameConfig.ts` → `FEATURES.reflection` |
+| Feature: logSummarization | `true` | `src/game/GameConfig.ts` → `FEATURES.logSummarization` |
+| Feature: functionBuilding | `true` | `src/game/GameConfig.ts` → `FEATURES.functionBuilding` |
+| Feature: searchTerminal | `true` | `src/game/GameConfig.ts` → `FEATURES.searchTerminal` |
 | Anthropic API key | `.env` file | `ANTHROPIC_API_KEY` |
 | Tavily API key | `.env` file | `TAVILY_API_KEY` |
 

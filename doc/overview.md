@@ -38,3 +38,7 @@ The dev server must be restarted after changing `.env`.
 | Arrow keys / WASD | Move player one tile |
 | Enter | Start conversation with adjacent NPC |
 | P | Pause / resume NPC turn loop |
+
+## Feature Toggles
+
+Subsystems can be toggled at runtime from the browser dev console via `FEATURES.<name> = false`. Six flags are available: `conversations`, `goals`, `reflection`, `logSummarization`, `functionBuilding`, `searchTerminal`. Cascade rules apply: disabling `conversations` also disables goals and reflection; disabling `goals` also disables reflection. See [architecture.md](architecture.md#feature-toggles) for details.

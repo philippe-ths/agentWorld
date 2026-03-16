@@ -4,6 +4,8 @@
 
 NPCs can hold conversations with each other and with the player. Conversations happen outside the normal turn loop — the turn system pauses while a conversation is active and resumes when it ends.
 
+The entire conversation system is gated by the `conversations` feature toggle. When disabled, NPC `start_conversation_with` directives are rejected and the player Enter key is blocked. See [architecture.md](architecture.md#feature-toggles) for cascade rules.
+
 There are three conversation flows:
 - **NPC-to-NPC** — initiated by an NPC directive, both sides driven by the LLM, shown via speech bubbles
 - **NPC-to-Player** — initiated by an NPC directive targeting "Player", opens the dialogue box so the player can respond
@@ -46,7 +48,7 @@ The opening message is shown in a speech bubble first, then the dialogue box ope
 
 ## Player-to-NPC Conversations
 
-Press **Enter** while adjacent to an NPC to open the dialogue box and start a conversation.
+Press **Enter** while adjacent to an NPC to open the dialogue box and start a conversation. When the `conversations` feature is disabled, the Enter key does nothing.
 
 ### Flow
 
@@ -108,13 +110,14 @@ Validation failures are logged as warnings and the directive is skipped.
 ## Turn System Integration
 
 - `start_conversation_with` **always ends the NPC's turn** — any remaining directives in that turn are discarded
+- When the `conversations` feature is off, `start_conversation_with` is rejected in `DirectiveExecutor` and does not end the turn
 - The turn loop pauses via `pauseForConversation()` and resumes via `resumeFromConversation()` when the conversation finishes
 - NPC movement is gated during conversations — `NPC.walkToAsync()` checks a pause gate before each step
 - The player pressing **Enter** also pauses the turn loop for the duration of the dialogue
 
 ## Goal Extraction
 
-After a conversation ends, `GoalExtractor.extractGoal()` runs on the transcript for each NPC participant. The `GOAL_EXTRACTION` prompt config (parameterized with the NPC's name) analyzes the transcript and detects new goals — direct requests, agreements, or self-initiated intentions. Extracted goals are added as active or pending goals via `GoalManager`.
+After a conversation ends, `GoalExtractor.extractGoal()` runs on the transcript for each NPC participant. This step is independently gated by the `goals` feature toggle — goal extraction is skipped when `goals` is off, even if `conversations` is on. The `GOAL_EXTRACTION` prompt config (parameterized with the NPC's name) analyzes the transcript and detects new goals — direct requests, agreements, or self-initiated intentions. Extracted goals are added as active or pending goals via `GoalManager`.
 
 See [architecture.md](architecture.md) for goal format and lifecycle details.
 

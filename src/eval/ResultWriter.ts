@@ -75,7 +75,7 @@ export function writeSuiteResult(results: ScenarioResult[]): string {
             globalTurnsElapsed: r.globalTurnsElapsed,
             npcTurnsTaken: r.npcTurnsTaken,
             failureReason: r.failureReason,
-            features: r.features,
+            config: r.config,
         })),
         summary: computeSummary(results),
     };

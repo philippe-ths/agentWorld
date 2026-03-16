@@ -2,7 +2,7 @@ import { HeadlessEntity, HeadlessNPC } from './HeadlessEntity';
 import { HeadlessEntityManager } from './HeadlessEntityManager';
 import { HeadlessDirectiveExecutor } from './HeadlessDirectiveExecutor';
 import { AbortMonitor } from './AbortMonitor';
-import { TestScenario, ScenarioResult, EvalGameState, TestOutcome, FeatureSnapshot } from './types';
+import { TestScenario, ScenarioResult, EvalGameState, TestOutcome, GameConfigSnapshot } from './types';
 import { ChronologicalLog } from '../game/ChronologicalLog';
 import { GoalManager } from '../game/GoalManager';
 import { ReflectionManager } from '../game/ReflectionManager';
@@ -12,9 +12,10 @@ import { ToolRegistry } from '../game/ToolRegistry';
 import { parseDirectives, Directive, repairDirectiveOutput, validateDirectiveOutput } from '../game/DirectiveParser';
 import {
     NPCS, PLAYER_SPAWN, BUILDINGS,
+    LLM_MODEL_OPUS, LLM_MODEL_SONNET, LLM_MODEL_HAIKU,
     SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS,
     UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD, OUTPUT_GUARD_REPROMPT_ATTEMPTS,
-    LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN, SLEEP_TURNS,
+    LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN, SLEEP_TURNS, MAX_EXCHANGES,
     FEATURES, isFeatureEnabled,
 } from '../game/GameConfig';
 
@@ -405,6 +406,27 @@ function createToolRegistry(): ToolRegistry {
 
 // ── Helper ───────────────────────────────────────────────────
 
+export function captureConfig(): GameConfigSnapshot {
+    return {
+        models: {
+            opus: LLM_MODEL_OPUS,
+            sonnet: LLM_MODEL_SONNET,
+            haiku: LLM_MODEL_HAIKU,
+        },
+        tuning: {
+            summarizeEveryNTurns: SUMMARIZE_EVERY_N_TURNS,
+            reflectionEveryNTurns: REFLECTION_EVERY_N_TURNS,
+            unknownDirectiveTriggerThreshold: UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD,
+            outputGuardRepromptAttempts: OUTPUT_GUARD_REPROMPT_ATTEMPTS,
+            logCharBudget: LOG_CHAR_BUDGET,
+            maxExchanges: MAX_EXCHANGES,
+            npcCommandsPerTurn: NPC_COMMANDS_PER_TURN,
+            sleepTurns: SLEEP_TURNS,
+        },
+        features: { ...FEATURES },
+    };
+}
+
 function buildResult(
     scenario: TestScenario,
     result: TestOutcome,
@@ -420,7 +442,7 @@ function buildResult(
         npcTurnsTaken,
         failureReason,
         maxGlobalTurns: scenario.maxGlobalTurns,
-        features: { ...FEATURES } as FeatureSnapshot,
+        config: captureConfig(),
         timestamp: new Date().toISOString(),
     };
 }

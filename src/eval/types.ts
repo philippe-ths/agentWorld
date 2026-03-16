@@ -29,13 +29,30 @@ export interface TestScenario {
 
 // ── Result shapes ────────────────────────────────────────────
 
-export interface FeatureSnapshot {
-    conversations: boolean;
-    goals: boolean;
-    reflection: boolean;
-    logSummarization: boolean;
-    functionBuilding: boolean;
-    searchTerminal: boolean;
+export interface GameConfigSnapshot {
+    models: {
+        opus: string;
+        sonnet: string;
+        haiku: string;
+    };
+    tuning: {
+        summarizeEveryNTurns: number;
+        reflectionEveryNTurns: number;
+        unknownDirectiveTriggerThreshold: number;
+        outputGuardRepromptAttempts: number;
+        logCharBudget: number;
+        maxExchanges: number;
+        npcCommandsPerTurn: number;
+        sleepTurns: number;
+    };
+    features: {
+        conversations: boolean;
+        goals: boolean;
+        reflection: boolean;
+        logSummarization: boolean;
+        functionBuilding: boolean;
+        searchTerminal: boolean;
+    };
 }
 
 export interface ScenarioResult {
@@ -46,7 +63,7 @@ export interface ScenarioResult {
     npcTurnsTaken: number;
     failureReason: string | null;
     maxGlobalTurns: number;
-    features: FeatureSnapshot;
+    config: GameConfigSnapshot;
     timestamp: string;
 }
 
@@ -58,7 +75,7 @@ export interface SuiteResult {
         globalTurnsElapsed: number;
         npcTurnsTaken: number;
         failureReason: string | null;
-        features: FeatureSnapshot;
+        config: GameConfigSnapshot;
     }>;
     summary: {
         successCount: number;

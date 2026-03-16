@@ -5,6 +5,7 @@ import {
     SUMMARIZE_EVERY_N_TURNS,
     LOG_CHAR_BUDGET,
     MAX_EXCHANGES,
+    isFeatureEnabled,
 } from './GameConfig';
 
 export { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, MAX_EXCHANGES };
@@ -27,37 +28,104 @@ export interface PromptConfig {
 export const DECISION: PromptConfig = {
     model: LLM_MODEL_OPUS,
     maxTokens: 320,
-    buildSystem: () => `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC.
-Each turn you receive a map, your memory, your current goal (if any), and your current reflection (if any).
+    buildSystem: () => {
+        const goals = isFeatureEnabled('goals');
+        const reflection = isFeatureEnabled('reflection');
+        const conversations = isFeatureEnabled('conversations');
+        const functionBuilding = isFeatureEnabled('functionBuilding');
+
+        // ── Context line ─────────────────────────────────────
+        const contextParts = ['a map', 'your memory'];
+        if (goals) contextParts.push('your current goal (if any)');
+        if (reflection) contextParts.push('your current reflection (if any)');
+
+        // ── Job instructions ─────────────────────────────────
+        const jobLines: string[] = [];
+        if (goals) {
+            jobLines.push('- If you have an active goal, work toward it.');
+            jobLines.push('- If you believe you have completed your active goal, mark it complete.');
+        }
+        jobLines.push('- Use your memory to avoid repeating failed actions.');
+        if (reflection) {
+            jobLines.push('- Use your reflection to notice repeated obstacles, apply your current strategy, and distrust stale assumptions.');
+        }
+        if (goals) {
+            jobLines.push('- If you have no active goal, you have no particular objective. You may sleep to conserve energy, but only if there is truly nothing useful to do.');
+        } else {
+            jobLines.push('- You may sleep to conserve energy, but only if there is truly nothing useful to do.');
+        }
+
+        // ── Commands ─────────────────────────────────────────
+        const commands: string[] = [
+            '  move_to(x,y) — walk to tile (x,y). Do not specify a path. The game will figure out a path.',
+            '  wait() — do nothing this action.',
+        ];
+        if (conversations) {
+            commands.push('  start_conversation_with(Name, message) — you must be adjacent to the entity. Ends your turn immediately.');
+        }
+        if (isFeatureEnabled('searchTerminal') || isFeatureEnabled('functionBuilding')) {
+            commands.push('  use_tool(tool_id, "arguments") — you must be adjacent to the tool building. Ends your turn immediately.');
+        }
+        if (functionBuilding) {
+            commands.push('  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge. Ends your turn immediately.');
+            commands.push('  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge. Ends your turn immediately.');
+            commands.push('  delete_function("function_name") — you must be adjacent to Code Forge. Ends your turn immediately.');
+        }
+        if (goals) {
+            commands.push('  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing useful to do. You CANNOT sleep if you have an active goal. Another entity can still wake you by starting a conversation.');
+            commands.push('  complete_goal() — mark your active goal as done.');
+            commands.push('  abandon_goal() — give up on your active goal.');
+            commands.push('  switch_goal() — abandon your active goal and start working on your pending goal.');
+        } else {
+            commands.push('  sleep() — enter low-power mode for 10 turns. Another entity can still wake you by starting a conversation.');
+        }
+
+        // ── Rules ────────────────────────────────────────────
+        const rules: string[] = [];
+        if (goals) {
+            rules.push('- Goal directives (complete_goal, abandon_goal, switch_goal) do NOT count toward your 3-action limit.');
+            rules.push('- If your current goal seems impossible, blocked for too long, or no longer relevant, you may abandon it.');
+        }
+        rules.push('- Entities and buildings occupy their tile. You cannot walk onto an occupied tile.');
+        rules.push('- To interact with an entity or tool, move to a tile next to them, not onto their tile.');
+        rules.push('- Do not narrate. Do not explain your reasoning outside the required format.');
+        rules.push('- Prefer concrete progress over hesitation.');
+        rules.push('- Avoid repeating actions that recently failed unless the world state has changed.');
+
+        // ── Examples ─────────────────────────────────────────
+        const examples: string[] = [];
+        if (conversations) {
+            examples.push(`Example valid response:
+REASONING: I should move next to Bjorn and tell him the search result.
+ACTIONS:
+move_to(12,8)
+start_conversation_with(Bjorn, I found the answer at the terminal)`);
+        }
+        if (goals) {
+            examples.push(`Example valid response:
+REASONING: My current goal is complete, so I should mark it done.
+ACTIONS:
+complete_goal()`);
+        }
+        examples.push(`Example invalid response:
+I will go talk to Bjorn now
+move_to(12,8)`);
+        examples.push(`Example invalid response:
+REASONING: I should help.
+ACTIONS:
+- move_to(12,8)`);
+
+        return `You are an NPC in a 2D isometric tile-based game world. You are a cooperative NPC.
+Each turn you receive ${contextParts.join(', ')}.
 
 Your job each turn:
-- If you have an active goal, work toward it.
-- If you believe you have completed your active goal, mark it complete.
-- Use your memory to avoid repeating failed actions.
-- Use your reflection to notice repeated obstacles, apply your current strategy, and distrust stale assumptions.
-- If you have no active goal, you have no particular objective. You may sleep to conserve energy, but only if there is truly nothing useful to do.
+${jobLines.join('\n')}
 
 Available commands (you get up to 3 action commands per turn):
-  move_to(x,y) — walk to tile (x,y). Do not specify a path. The game will figure out a path.
-  wait() — do nothing this action.
-  start_conversation_with(Name, message) — you must be adjacent to the entity. Ends your turn immediately.
-  use_tool(tool_id, "arguments") — you must be adjacent to the tool building. Ends your turn immediately.
-  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge. Ends your turn immediately.
-  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge. Ends your turn immediately.
-  delete_function("function_name") — you must be adjacent to Code Forge. Ends your turn immediately.
-  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing useful to do. You CANNOT sleep if you have an active goal. Another entity can still wake you by starting a conversation.
-  complete_goal() — mark your active goal as done.
-  abandon_goal() — give up on your active goal.
-  switch_goal() — abandon your active goal and start working on your pending goal.
+${commands.join('\n')}
 
 Rules:
-- Goal directives (complete_goal, abandon_goal, switch_goal) do NOT count toward your 3-action limit.
-- If your current goal seems impossible, blocked for too long, or no longer relevant, you may abandon it.
-- Entities and buildings occupy their tile. You cannot walk onto an occupied tile.
-- To interact with an entity or tool, move to a tile next to them, not onto their tile.
-- Do not narrate. Do not explain your reasoning outside the required format.
-- Prefer concrete progress over hesitation.
-- Avoid repeating actions that recently failed unless the world state has changed.
+${rules.join('\n')}
 
 You must respond in EXACTLY this format:
 
@@ -73,25 +141,8 @@ Formatting rules:
 - If you have no useful action, output wait() under ACTIONS.
 - If you include text outside this format, your response will be rejected and you will be reprompted.
 
-Example valid response:
-REASONING: I should move next to Bjorn and tell him the search result.
-ACTIONS:
-move_to(12,8)
-start_conversation_with(Bjorn, I found the answer at the terminal)
-
-Example valid response:
-REASONING: My current goal is complete, so I should mark it done.
-ACTIONS:
-complete_goal()
-
-Example invalid response:
-I will go talk to Bjorn now
-move_to(12,8)
-
-Example invalid response:
-REASONING: I should help.
-ACTIONS:
-- move_to(12,8)`,
+${examples.join('\n\n')}`;
+    },
 };
 
 /**

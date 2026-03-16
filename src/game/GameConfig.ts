@@ -10,7 +10,7 @@ export const TILE_H = 32;
 
 // ── Timing ───────────────────────────────────────────────────
 
-export const NPC_TURN_DELAY = 5000;
+export const NPC_TURN_DELAY = 1000;
 export const SPEECH_BUBBLE_DURATION = 3000;
 export const MOVE_TWEEN_DURATION = 180;
 export const MAX_REPATH_ATTEMPTS = 5;
@@ -67,6 +67,47 @@ export const LOG_CHAR_BUDGET = 4000;
 export const MAX_EXCHANGES = 6;
 export const NPC_COMMANDS_PER_TURN = 3;
 export const SLEEP_TURNS = 10;
+
+// ── Feature flags ────────────────────────────────────────────
+// Toggle subsystems on/off at runtime via browser console: FEATURES.goals = false
+// Cascade rules:
+//   conversations: false → goals off → reflection off
+//   goals: false → reflection off
+//   reflection, logSummarization, functionBuilding — independent
+
+export const FEATURES = {
+    conversations: true,
+    goals: true,
+    reflection: true,
+    logSummarization: true,
+    functionBuilding: true,    
+    searchTerminal: true,
+};
+
+export type FeatureKey = keyof typeof FEATURES;
+
+/** Resolve effective state including cascade dependencies. */
+export function isFeatureEnabled(key: FeatureKey): boolean {
+    switch (key) {
+        case 'reflection':
+            return FEATURES.reflection && FEATURES.goals && FEATURES.conversations;
+        case 'goals':
+            return FEATURES.goals && FEATURES.conversations;
+        case 'conversations':
+            return FEATURES.conversations;
+        case 'logSummarization':
+            return FEATURES.logSummarization;
+        case 'functionBuilding':
+            return FEATURES.functionBuilding;
+        case 'searchTerminal':
+            return FEATURES.searchTerminal;
+    }
+}
+
+// Expose on window for runtime toggling from browser dev console
+if (typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).FEATURES = FEATURES;
+}
 
 // ── NPC definitions ──────────────────────────────────────────
 

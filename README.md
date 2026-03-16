@@ -11,6 +11,7 @@ An isometric game where autonomous NPCs explore, make decisions, and hold conver
 - **Code Forge tools** — NPCs can create pure synchronous computation tools at runtime; requests requiring network access, filesystem access, databases, email sending, or other external side effects are rejected and written back into NPC memory
 - **Procedural map** — 30×30 isometric tile map with seeded terrain generation (grass + water ponds)
 - **Turn system** — Sequential NPC turns with pause/resume control
+- **Feature toggles** — Toggle subsystems (conversations, goals, reflection, log summarization, function building, search terminal) at runtime via browser console with cascade dependencies
 
 ## Tech Stack
 
@@ -55,6 +56,8 @@ The dev server must be restarted after changing `.env`.
 Each game tick, NPCs take sequential turns. On its turn, an NPC receives a text-based snapshot of the world (a character grid with entity positions) plus its memory log and current goals. Claude responds with commands like `move_to(x,y)`, `wait()`, or `start_conversation_with(Name, message)`. Commands execute with animated movement and speech bubbles.
 
 The player is not part of the turn system and moves freely. Press **Enter** next to an NPC to open a dialogue box and chat directly — the NPC responds via Claude using its memory and world awareness.
+
+Subsystems can be toggled at runtime from the browser dev console: `FEATURES.goals = false`. See [Feature Toggles](doc/architecture.md#feature-toggles) for the full list and cascade rules.
 
 The Code Forge is intentionally limited to pure synchronous JavaScript that runs inside the sandbox. It cannot send emails, access the network, call external APIs, read or write files, or access databases. Unsupported requests are rejected honestly so NPCs can remember the limitation and choose a different approach.
 

@@ -9,7 +9,7 @@ import { extractGoal, GoalExtractionResult } from './GoalExtractor';
 import { ReflectionManager } from './ReflectionManager';
 import { buildWorldState } from './WorldState';
 import { ToolRegistry } from './ToolRegistry';
-import { LOG_CHAR_BUDGET, MAX_EXCHANGES, SPEECH_BUBBLE_DURATION } from './GameConfig';
+import { LOG_CHAR_BUDGET, MAX_EXCHANGES, SPEECH_BUBBLE_DURATION, isFeatureEnabled } from './GameConfig';
 
 export interface ConversationSession {
     initiator: Entity;
@@ -329,12 +329,14 @@ export class ConversationManager {
                 npcLog.recordConversation({ ...transcript, partnerName: 'Player' });
             }
             // Extract goal for the NPC participant
-            const npcEntity = session.initiator instanceof Player ? session.target : session.initiator;
-            const goalMgr = this.goals.get(npcName);
-            if (goalMgr) {
-                const worldState = buildWorldState(npcEntity, entities, this.toolRegistry);
-                const result = await extractGoal(npcName, session.history, worldState, goalMgr);
-                await this.applyConversationGoalResult(npcName, npcEntity, result, session.turnNumber);
+            if (isFeatureEnabled('goals')) {
+                const npcEntity = session.initiator instanceof Player ? session.target : session.initiator;
+                const goalMgr = this.goals.get(npcName);
+                if (goalMgr) {
+                    const worldState = buildWorldState(npcEntity, entities, this.toolRegistry);
+                    const result = await extractGoal(npcName, session.history, worldState, goalMgr);
+                    await this.applyConversationGoalResult(npcName, npcEntity, result, session.turnNumber);
+                }
             }
         } else {
             // NPC-to-NPC: save to both logs and extract goals for both
@@ -347,17 +349,19 @@ export class ConversationManager {
                 targetLog.recordConversation({ ...transcript, partnerName: session.initiator.name });
             }
 
-            const initiatorGoals = this.goals.get(session.initiator.name);
-            const targetGoals = this.goals.get(session.target.name);
-            if (initiatorGoals) {
-                const ws = buildWorldState(session.initiator, entities, this.toolRegistry);
-                const result = await extractGoal(session.initiator.name, session.history, ws, initiatorGoals);
-                await this.applyConversationGoalResult(session.initiator.name, session.initiator, result, session.turnNumber);
-            }
-            if (targetGoals) {
-                const ws = buildWorldState(session.target, entities, this.toolRegistry);
-                const result = await extractGoal(session.target.name, session.history, ws, targetGoals);
-                await this.applyConversationGoalResult(session.target.name, session.target, result, session.turnNumber);
+            if (isFeatureEnabled('goals')) {
+                const initiatorGoals = this.goals.get(session.initiator.name);
+                const targetGoals = this.goals.get(session.target.name);
+                if (initiatorGoals) {
+                    const ws = buildWorldState(session.initiator, entities, this.toolRegistry);
+                    const result = await extractGoal(session.initiator.name, session.history, ws, initiatorGoals);
+                    await this.applyConversationGoalResult(session.initiator.name, session.initiator, result, session.turnNumber);
+                }
+                if (targetGoals) {
+                    const ws = buildWorldState(session.target, entities, this.toolRegistry);
+                    const result = await extractGoal(session.target.name, session.history, ws, targetGoals);
+                    await this.applyConversationGoalResult(session.target.name, session.target, result, session.turnNumber);
+                }
             }
         }
 
@@ -417,6 +421,8 @@ export class ConversationManager {
         result: GoalExtractionResult,
         turnNumber: number,
     ): Promise<void> {
+        if (!isFeatureEnabled('reflection')) return;
+
         const reflectionManager = this.reflections.get(npcName);
         if (!reflectionManager || !(npc instanceof NPC)) return;
 

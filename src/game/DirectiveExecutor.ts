@@ -6,6 +6,7 @@ import { ToolRegistry } from './ToolRegistry';
 import { Directive } from './DirectiveParser';
 import { isAdjacentToBuilding } from './MapData';
 import { ReflectionEvent } from './ReflectionManager';
+import { isFeatureEnabled } from './GameConfig';
 
 export type GoalExecutionResult =
     | { type: 'completed_goal'; goal: string }
@@ -123,6 +124,10 @@ export class DirectiveExecutor {
                 log.recordAction('→ waited');
                 return { shouldStop: false };
             case 'start_conversation_with': {
+                if (!isFeatureEnabled('conversations')) {
+                    log.recordAction(`→ start_conversation_with rejected: conversations are disabled`);
+                    return { shouldStop: false };
+                }
                 console.log(`%c[${npc.name}] start_conversation_with(${dir.targetName}, ${dir.message})`, 'color: #ff9f43');
                 const convoResult = await this.conversationManager.startNpcConversation(
                     npc, dir.targetName, dir.message, turnNumber,
@@ -152,7 +157,7 @@ export class DirectiveExecutor {
             }
             case 'use_tool': {
                 const building = this.toolRegistry.getById(dir.toolId);
-                if (!building) {
+                if (!building || !this.toolRegistry.getVisible().some(b => b.id === dir.toolId)) {
                     console.warn(`%c[${npc.name}] use_tool: unknown tool "${dir.toolId}"`, 'color: #ffaa00');
                     log.recordAction(`→ failed: unknown tool "${dir.toolId}"`);
                     return {

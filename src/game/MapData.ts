@@ -1,5 +1,5 @@
 import { PLAYER_SPAWN, NPCS, BUILDINGS, MAP_SEED, MAP_COLS, MAP_ROWS } from './GameConfig';
-import { TilePos } from './entities/Entity';
+import { TilePos } from './types';
 import { ToolBuilding } from './ToolBuilding';
 
 export const TILE_WATER = 1;

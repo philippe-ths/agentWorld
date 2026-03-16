@@ -1,4 +1,4 @@
-import { TilePos } from './entities/Entity';
+import { TilePos } from './types';
 
 export interface ToolBuilding {
     id: string;

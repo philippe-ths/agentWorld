@@ -1,4 +1,4 @@
-import { TilePos } from './entities/Entity';
+import { TilePos } from './types';
 
 /**
  * A* pathfinding on a 4-directional grid.

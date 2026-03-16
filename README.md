@@ -11,6 +11,7 @@ An isometric game where autonomous NPCs explore, make decisions, and hold conver
 - **Code Forge tools** — NPCs can create pure synchronous computation tools at runtime; requests requiring network access, filesystem access, databases, email sending, or other external side effects are rejected and written back into NPC memory
 - **Procedural map** — 30×30 isometric tile map with seeded terrain generation (grass + water ponds)
 - **Turn system** — Sequential NPC turns with pause/resume control
+- **Headless evaluation** — Run NPC scenarios from the command line without a browser, with success/fail/abort detection and JSON result output
 - **Feature toggles** — Toggle subsystems (conversations, goals, reflection, log summarization, function building, search terminal) at runtime via browser console with cascade dependencies
 
 ## Tech Stack
@@ -51,6 +52,20 @@ The dev server must be restarted after changing `.env`.
 | P | Pause / resume NPC turn loop |
 | Escape | Close dialogue box |
 
+## Evaluation
+
+Scenarios can be run headlessly from the command line — no browser needed. The evaluation system replicates the game's turn loop in pure Node.js:
+
+```bash
+# Run a single scenario
+npm run dev -- --test-scenario scenario-one
+
+# Run a suite of scenarios
+npm run dev -- --testing-mode scenario-one scenario-gather --title "nightly"
+```
+
+Results are written to `data/test-results/` as timestamped JSON files. See [Evaluation](doc/evaluation.md) for the full scenario authoring guide and architecture.
+
 ## How It Works
 
 Each game tick, NPCs take sequential turns. On its turn, an NPC receives a text-based snapshot of the world (a character grid with entity positions) plus its memory log and current goals. Claude responds with commands like `move_to(x,y)`, `wait()`, or `start_conversation_with(Name, message)`. Commands execute with animated movement and speech bubbles.
@@ -72,3 +87,4 @@ Detailed docs are in the [`doc/`](doc/) folder:
 | [Turn System](doc/turn-system.md) | NPC turn loop, commands, pause/resume |
 | [LLM Integration](doc/llm-integration.md) | Prompts, API proxy, memory, debugging |
 | [Conversations](doc/conversations.md) | NPC-NPC and Player-NPC conversation system |
+| [Evaluation](doc/evaluation.md) | Headless scenario runner, CLI usage, authoring guide |

@@ -42,3 +42,7 @@ The dev server must be restarted after changing `.env`.
 ## Feature Toggles
 
 Subsystems can be toggled at runtime from the browser dev console via `FEATURES.<name> = false`. Six flags are available: `conversations`, `goals`, `reflection`, `logSummarization`, `functionBuilding`, `searchTerminal`. Cascade rules apply: disabling `conversations` also disables goals and reflection; disabling `goals` also disables reflection. See [architecture.md](architecture.md#feature-toggles) for details.
+
+## Evaluation
+
+Scenarios can be run headlessly from the command line — no browser needed. The evaluation system replicates the turn loop in pure Node.js with success/fail/abort detection and JSON result output. See [evaluation.md](evaluation.md) for CLI usage, scenario authoring, and architecture.

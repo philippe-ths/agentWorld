@@ -22,7 +22,7 @@ export function buildWorldState(observer: Entity, allEntities: Entity[], toolReg
     }
 
     // Buildings (always visible)
-    const buildings = toolRegistry?.getAll() ?? [];
+    const buildings = toolRegistry?.getVisible() ?? [];
     if (buildings.length > 0) {
         lines.push('BUILDINGS:');
         for (const b of buildings) {

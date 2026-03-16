@@ -1,5 +1,5 @@
 import { SUMMARIZE } from './prompts';
-import { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, LLM_ENDPOINTS } from './GameConfig';
+import { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET, LLM_ENDPOINTS, isFeatureEnabled } from './GameConfig';
 
 export { SUMMARIZE_EVERY_N_TURNS, LOG_CHAR_BUDGET };
 
@@ -200,6 +200,7 @@ export class ChronologicalLog {
     }
 
     async maybeSummarize(summarizeEveryN: number): Promise<void> {
+        if (!isFeatureEnabled('logSummarization')) return;
         if (this.entries.length <= summarizeEveryN) return;
 
         // Entries eligible for summarization: everything except the last N

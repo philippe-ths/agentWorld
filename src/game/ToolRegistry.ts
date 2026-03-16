@@ -1,5 +1,5 @@
 import { ToolBuilding } from './ToolBuilding';
-import { BuildingDef, FunctionRecord } from './GameConfig';
+import { BuildingDef, FunctionRecord, isFeatureEnabled } from './GameConfig';
 
 export class ToolRegistry {
     private buildings = new Map<string, ToolBuilding>();
@@ -54,6 +54,17 @@ export class ToolRegistry {
 
     getAll(): ToolBuilding[] {
         return [...this.buildings.values()];
+    }
+
+    /** Returns buildings visible to NPCs — filters out function-building infrastructure when functionBuilding is disabled. */
+    getVisible(): ToolBuilding[] {
+        const all = this.getAll();
+        if (isFeatureEnabled('functionBuilding') && isFeatureEnabled('searchTerminal')) return all;
+        return all.filter(b => {
+            if (!isFeatureEnabled('functionBuilding') && (b.symbol === 'F' || b.id === 'code_forge')) return false;
+            if (!isFeatureEnabled('searchTerminal') && b.id === 'search_terminal') return false;
+            return true;
+        });
     }
 
     getById(id: string): ToolBuilding | undefined {

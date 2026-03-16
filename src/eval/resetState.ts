@@ -1,7 +1,9 @@
 import { readdirSync, unlinkSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..', '..', 'data');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..', '..', 'data');
 const LOGS_DIR = resolve(ROOT, 'logs');
 const FUNCTIONS_DIR = resolve(ROOT, 'functions');
 

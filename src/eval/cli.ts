@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { getScenario, getAllScenarioIds } from './scenarios/index';
 import { resetState } from './resetState';
@@ -8,7 +9,8 @@ import { runScenario } from './HeadlessTurnLoop';
 import { printScenarioResult, writeScenarioResult, printSuiteResult, writeSuiteResult } from './ResultWriter';
 import { ScenarioResult } from './types';
 
-const RESULTS_DIR = resolve(import.meta.dirname, '..', '..', 'data', 'test-results');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const RESULTS_DIR = resolve(__dirname, '..', '..', 'data', 'test-results');
 
 // ── Argument parsing ─────────────────────────────────────────
 
@@ -41,8 +43,8 @@ if (testScenarioIdx !== -1) {
     void runSuite(scenarioIds);
 } else {
     console.error('Usage:');
-    console.error('  npm run eval -- --test-scenario <scenario-id>');
-    console.error('  npm run eval -- --testing-mode <scenario-id> [scenario-id ...]');
+    console.error('  npm run dev -- --test-scenario <scenario-id>');
+    console.error('  npm run dev -- --testing-mode <scenario-id> [scenario-id ...]');
     console.error(`\nAvailable scenarios: ${getAllScenarioIds().join(', ')}`);
     process.exit(1);
 }
@@ -59,7 +61,7 @@ async function runSingle(scenarioId: string): Promise<void> {
 
     // Start Vite dev server for API endpoints (LLM proxy, log I/O, etc.)
     const server = await createServer({
-        configFile: resolve(import.meta.dirname, '..', '..', 'vite', 'config.dev.mjs'),
+        configFile: resolve(__dirname, '..', '..', 'vite', 'config.dev.mjs'),
         server: { port: 0 }, // Use random available port
     });
     await server.listen();
@@ -143,7 +145,7 @@ async function runSuite(scenarioIds: string[]): Promise<void> {
 
 function spawnScenarioProcess(scenarioId: string): Promise<ScenarioResult> {
     return new Promise((promiseResolve) => {
-        const projectRoot = resolve(import.meta.dirname, '..', '..');
+        const projectRoot = resolve(__dirname, '..', '..');
         const child = spawn(
             'npx',
             ['tsx', 'src/eval/cli.ts', '--test-scenario', scenarioId],

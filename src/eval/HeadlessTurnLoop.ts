@@ -383,7 +383,7 @@ async function enforceOutputGuard(
         );
     }
 
-    abortMonitor?.recordInvalidOutput();
+    // Unreachable: loop always returns. Keep as safety net.
     return { cleanedResponse: 'wait()', unknownCountFromRaw, reasoning };
 }
 

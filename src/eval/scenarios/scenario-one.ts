@@ -1,7 +1,9 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { TestScenario, EvalGameState } from '../types';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const TARGET_TILE = { x: 20, y: 10 };
 
 const scenarioOne: TestScenario = {
@@ -21,7 +23,7 @@ const scenarioOne: TestScenario = {
             `- I told the player: "Sure, I'll make my way over to (${TARGET_TILE.x},${TARGET_TILE.y}) right away."`,
         ].join('\n') + '\n';
 
-        const logsDir = resolve(import.meta.dirname, '..', '..', '..', 'data', 'logs');
+        const logsDir = resolve(__dirname, '..', '..', '..', 'data', 'logs');
         mkdirSync(logsDir, { recursive: true });
         writeFileSync(resolve(logsDir, 'chronological-Ada.md'), seed, 'utf-8');
     },

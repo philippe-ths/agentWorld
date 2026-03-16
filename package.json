@@ -5,10 +5,9 @@
     "private": true,
     "license": "MIT",
     "scripts": {
-        "dev": "vite --config vite/config.dev.mjs",
+        "dev": "tsx src/eval/dev-entry.ts",
         "build": "vite build --config vite/config.prod.mjs",
-        "test": "vitest run",
-        "eval": "tsx src/eval/cli.ts"
+        "test": "vitest run"
     },
     "devDependencies": {
         "@types/node": "^25.5.0",

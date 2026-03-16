@@ -16,6 +16,7 @@ export function printScenarioResult(r: ScenarioResult): void {
     const ts = r.timestamp.replace(/[:.]/g, '-').slice(0, 19);
     const lines = [
         `[TEST] ${r.scenarioId}`,
+        ...(r.title ? [`Title: ${r.title}`] : []),
         `Target NPC: ${r.targetNpc}`,
         `Result: ${r.result}`,
         `Global turns elapsed: ${r.globalTurnsElapsed}`,
@@ -76,6 +77,7 @@ export function writeSuiteResult(results: ScenarioResult[]): string {
             npcTurnsTaken: r.npcTurnsTaken,
             failureReason: r.failureReason,
             config: r.config,
+            ...(r.title ? { title: r.title } : {}),
         })),
         summary: computeSummary(results),
     };

@@ -65,6 +65,7 @@ export interface ScenarioResult {
     maxGlobalTurns: number;
     config: GameConfigSnapshot;
     timestamp: string;
+    title?: string;
 }
 
 export interface SuiteResult {
@@ -76,6 +77,7 @@ export interface SuiteResult {
         npcTurnsTaken: number;
         failureReason: string | null;
         config: GameConfigSnapshot;
+        title?: string;
     }>;
     summary: {
         successCount: number;

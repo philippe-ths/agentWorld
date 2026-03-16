@@ -29,6 +29,15 @@ export interface TestScenario {
 
 // ── Result shapes ────────────────────────────────────────────
 
+export interface FeatureSnapshot {
+    conversations: boolean;
+    goals: boolean;
+    reflection: boolean;
+    logSummarization: boolean;
+    functionBuilding: boolean;
+    searchTerminal: boolean;
+}
+
 export interface ScenarioResult {
     scenarioId: string;
     targetNpc: string;
@@ -37,6 +46,7 @@ export interface ScenarioResult {
     npcTurnsTaken: number;
     failureReason: string | null;
     maxGlobalTurns: number;
+    features: FeatureSnapshot;
     timestamp: string;
 }
 
@@ -48,6 +58,7 @@ export interface SuiteResult {
         globalTurnsElapsed: number;
         npcTurnsTaken: number;
         failureReason: string | null;
+        features: FeatureSnapshot;
     }>;
     summary: {
         successCount: number;

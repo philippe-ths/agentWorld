@@ -2,7 +2,7 @@ import { HeadlessEntity, HeadlessNPC } from './HeadlessEntity';
 import { HeadlessEntityManager } from './HeadlessEntityManager';
 import { HeadlessDirectiveExecutor } from './HeadlessDirectiveExecutor';
 import { AbortMonitor } from './AbortMonitor';
-import { TestScenario, ScenarioResult, EvalGameState, TestOutcome } from './types';
+import { TestScenario, ScenarioResult, EvalGameState, TestOutcome, FeatureSnapshot } from './types';
 import { ChronologicalLog } from '../game/ChronologicalLog';
 import { GoalManager } from '../game/GoalManager';
 import { ReflectionManager } from '../game/ReflectionManager';
@@ -15,7 +15,7 @@ import {
     SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS,
     UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD, OUTPUT_GUARD_REPROMPT_ATTEMPTS,
     LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN, SLEEP_TURNS,
-    isFeatureEnabled,
+    FEATURES, isFeatureEnabled,
 } from '../game/GameConfig';
 
 /**
@@ -420,6 +420,7 @@ function buildResult(
         npcTurnsTaken,
         failureReason,
         maxGlobalTurns: scenario.maxGlobalTurns,
+        features: { ...FEATURES } as FeatureSnapshot,
         timestamp: new Date().toISOString(),
     };
 }

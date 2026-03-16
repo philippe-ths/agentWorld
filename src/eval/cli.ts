@@ -8,6 +8,7 @@ import { resetState } from './resetState';
 import { runScenario } from './HeadlessTurnLoop';
 import { printScenarioResult, writeScenarioResult, printSuiteResult, writeSuiteResult } from './ResultWriter';
 import { ScenarioResult } from './types';
+import { FEATURES } from '../game/GameConfig';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const RESULTS_DIR = resolve(__dirname, '..', '..', 'data', 'test-results');
@@ -99,6 +100,7 @@ async function runSingle(scenarioId: string): Promise<void> {
                 npcTurnsTaken: 0,
                 failureReason: 'runtime error',
                 maxGlobalTurns: scenario.maxGlobalTurns,
+                features: { ...FEATURES },
                 timestamp: new Date().toISOString(),
             };
         }
@@ -172,6 +174,7 @@ function spawnScenarioProcess(scenarioId: string): Promise<ScenarioResult> {
                     npcTurnsTaken: 0,
                     failureReason: 'runtime error',
                     maxGlobalTurns: getScenario(scenarioId)?.maxGlobalTurns ?? 0,
+                    features: { ...FEATURES },
                     timestamp: new Date().toISOString(),
                 });
             }

@@ -33,3 +33,6 @@ data/logs/chronological-*.md
 data/logs/goals-*.md
 
 data/functions/*.json
+
+# Evaluation results
+data/test-results/

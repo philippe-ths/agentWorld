@@ -76,12 +76,12 @@ export const SLEEP_TURNS = 10;
 //   reflection, logSummarization, functionBuilding — independent
 
 export const FEATURES = {
-    conversations: true,
-    goals: true,
-    reflection: true,
-    logSummarization: true,
-    functionBuilding: true,    
-    searchTerminal: true,
+    conversations: false,
+    goals: false,
+    reflection: false,
+    logSummarization: false,
+    functionBuilding: false,    
+    searchTerminal: false,
 };
 
 export type FeatureKey = keyof typeof FEATURES;

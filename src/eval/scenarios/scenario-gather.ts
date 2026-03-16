@@ -12,12 +12,6 @@ const scenarioGather: TestScenario = {
     targetNpc: 'Ada',
     maxGlobalTurns: 25,
 
-    // Enable conversations and goals so Ada can instruct Bjorn/Cora
-    features: {
-        conversations: true,
-        goals: true,
-    },
-
     async seedChronologicalLog(): Promise<void> {
         const logsDir = resolve(__dirname, '..', '..', '..', 'data', 'logs');
         mkdirSync(logsDir, { recursive: true });

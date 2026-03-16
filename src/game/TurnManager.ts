@@ -15,7 +15,7 @@ import { ReflectionManager } from './ReflectionManager';
 import {
     SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS, UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD,
     OUTPUT_GUARD_REPROMPT_ATTEMPTS, LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN,
-    NPC_TURN_DELAY, FONT, SLEEP_TURNS,
+    NPC_TURN_DELAY, FONT, SLEEP_TURNS, isFeatureEnabled,
 } from './GameConfig';
 
 type TurnState = 'idle' | 'npc-turn' | 'paused';
@@ -73,13 +73,17 @@ export class TurnManager {
             await log.load();
             this.logs.set(npc.name, log);
 
-            const goalMgr = new GoalManager(npc.name);
-            await goalMgr.load();
-            this.goals.set(npc.name, goalMgr);
+            if (isFeatureEnabled('goals')) {
+                const goalMgr = new GoalManager(npc.name);
+                await goalMgr.load();
+                this.goals.set(npc.name, goalMgr);
+            }
 
-            const reflectionMgr = new ReflectionManager(npc.name);
-            await reflectionMgr.load();
-            this.reflections.set(npc.name, reflectionMgr);
+            if (isFeatureEnabled('reflection')) {
+                const reflectionMgr = new ReflectionManager(npc.name);
+                await reflectionMgr.load();
+                this.reflections.set(npc.name, reflectionMgr);
+            }
         }
 
         // Resume turn counter from persisted logs
@@ -159,8 +163,8 @@ export class TurnManager {
         }
 
         const log = this.logs.get(npc.name)!;
-        const goalManager = this.goals.get(npc.name)!;
-        const reflectionManager = this.reflections.get(npc.name)!;
+        const goalManager = this.goals.get(npc.name);
+        const reflectionManager = this.reflections.get(npc.name);
         const entities = this.allEntities.getEntities();
 
         // Record observations for this turn
@@ -179,10 +183,12 @@ export class TurnManager {
         try {
             worldState = buildWorldState(npc, entities, this.toolRegistry);
             memory = log.buildPromptContent(LOG_CHAR_BUDGET);
-            goalsContent = goalManager.buildPromptContent();
-            reflectionManager.markPeriodicStale(this.turnNumber, REFLECTION_EVERY_N_TURNS);
-            await reflectionManager.refreshIfStale(this.turnNumber, worldState, memory, goalsContent);
-            reflectionContent = reflectionManager.buildPromptContent();
+            if (goalManager) goalsContent = goalManager.buildPromptContent();
+            if (reflectionManager) {
+                reflectionManager.markPeriodicStale(this.turnNumber, REFLECTION_EVERY_N_TURNS);
+                await reflectionManager.refreshIfStale(this.turnNumber, worldState, memory, goalsContent);
+                reflectionContent = reflectionManager.buildPromptContent();
+            }
 
             const response = await this.llm.decide(
                 npc.name,
@@ -203,7 +209,7 @@ export class TurnManager {
                 log,
             );
 
-            if (guarded.unknownCountFromRaw >= UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD) {
+            if (reflectionManager && guarded.unknownCountFromRaw >= UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD) {
                 reflectionManager.markUnknownDirectiveFlood(this.turnNumber, guarded.unknownCountFromRaw);
                 await reflectionManager.refreshIfStale(this.turnNumber, worldState, memory, goalsContent);
             }
@@ -229,7 +235,7 @@ export class TurnManager {
             
             // Fix: Feed the error back to the NPC's memory log
             log.recordAction(`My action failed because my response wasn't understood: ${msg}`);
-            reflectionManager.recordEvent({
+            reflectionManager?.recordEvent({
                 turnNumber: this.turnNumber,
                 kind: 'failure',
                 summary: `Decision failed: ${msg}`,
@@ -248,21 +254,23 @@ export class TurnManager {
         );
 
         // Execute goal directives first (instant, no budget cost)
-        for (const dir of goalDirectives) {
-            const result = await this.executor.executeGoal(npc, dir, log, goalManager);
-            if (!result) continue;
-            if (result.type === 'completed_goal') {
-                reflectionManager.markGoalCompleted(this.turnNumber, result.goal);
-                await reflectionManager.generateCompletionLesson(
-                    this.turnNumber,
-                    result.goal,
-                    memory,
-                    worldState,
-                );
-            } else if (result.type === 'abandoned_goal') {
-                reflectionManager.markGoalAbandoned(this.turnNumber, result.goal);
-            } else if (result.type === 'switched_goal') {
-                reflectionManager.markGoalSwitched(this.turnNumber, result.oldGoal, result.newGoal);
+        if (goalManager) {
+            for (const dir of goalDirectives) {
+                const result = await this.executor.executeGoal(npc, dir, log, goalManager);
+                if (!result) continue;
+                if (result.type === 'completed_goal') {
+                    reflectionManager?.markGoalCompleted(this.turnNumber, result.goal);
+                    await reflectionManager?.generateCompletionLesson(
+                        this.turnNumber,
+                        result.goal,
+                        memory,
+                        worldState,
+                    );
+                } else if (result.type === 'abandoned_goal') {
+                    reflectionManager?.markGoalAbandoned(this.turnNumber, result.goal);
+                } else if (result.type === 'switched_goal') {
+                    reflectionManager?.markGoalSwitched(this.turnNumber, result.oldGoal, result.newGoal);
+                }
             }
         }
 
@@ -278,34 +286,46 @@ export class TurnManager {
             }
 
             if (dir.type === 'create_function') {
+                if (!isFeatureEnabled('functionBuilding')) {
+                    log.recordAction('→ create_function rejected: function building is disabled');
+                    continue;
+                }
                 const result = await this.functionBuilder.handleCreateFunction(npc, log, dir.description, dir.x, dir.y, this.turnNumber);
-                if (result.reflectionEvent) reflectionManager.recordEvent(result.reflectionEvent);
+                if (result.reflectionEvent) reflectionManager?.recordEvent(result.reflectionEvent);
                 break;
             }
 
             if (dir.type === 'update_function') {
+                if (!isFeatureEnabled('functionBuilding')) {
+                    log.recordAction('→ update_function rejected: function building is disabled');
+                    continue;
+                }
                 const result = await this.functionBuilder.handleUpdateFunction(npc, log, dir.functionName, dir.changeDescription, this.turnNumber);
-                if (result.reflectionEvent) reflectionManager.recordEvent(result.reflectionEvent);
+                if (result.reflectionEvent) reflectionManager?.recordEvent(result.reflectionEvent);
                 break;
             }
 
             if (dir.type === 'delete_function') {
+                if (!isFeatureEnabled('functionBuilding')) {
+                    log.recordAction('→ delete_function rejected: function building is disabled');
+                    continue;
+                }
                 const result = await this.functionBuilder.handleDeleteFunction(npc, log, dir.functionName, this.turnNumber);
-                if (result.reflectionEvent) reflectionManager.recordEvent(result.reflectionEvent);
+                if (result.reflectionEvent) reflectionManager?.recordEvent(result.reflectionEvent);
                 break;
             }
 
             try {
                 const result = await this.executor.executeAction(npc, dir, log, this.turnNumber);
                 if (result.reflectionEvent) {
-                    reflectionManager.recordEvent(result.reflectionEvent);
+                    reflectionManager?.recordEvent(result.reflectionEvent);
                 }
                 if (result.shouldStop) break;
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`%c[TurnManager] Action error for ${npc.name}: ${msg}`, 'color: #ff4444');
                 log.recordAction(`My action '${dir.type}' failed with an exception: ${msg}`);
-                reflectionManager.recordEvent({
+                reflectionManager?.recordEvent({
                     turnNumber: this.turnNumber,
                     kind: 'failure',
                     summary: `Action ${dir.type} threw an exception`,
@@ -317,10 +337,10 @@ export class TurnManager {
 
         // Check if NPC chose to sleep (blocked if they have an active goal)
         if (actionDirectives.some(d => d.type === 'sleep')) {
-            if (goalManager.getActiveGoal()) {
+            if (goalManager?.getActiveGoal()) {
                 console.log(`%c[${npc.name}] sleep() rejected — has active goal`, 'color: #ffaa00; font-weight: bold');
                 log.recordAction('→ sleep rejected: has active goal');
-                reflectionManager.recordEvent({
+                reflectionManager?.recordEvent({
                     turnNumber: this.turnNumber,
                     kind: 'failure',
                     summary: 'Sleep blocked by active goal',
@@ -336,9 +356,9 @@ export class TurnManager {
 
         // Persist log to disk, then try summarization
         await log.save();
-        await log.maybeSummarize(SUMMARIZE_EVERY_N_TURNS);
-        await goalManager.save();
-        await reflectionManager.save();
+        if (isFeatureEnabled('logSummarization')) await log.maybeSummarize(SUMMARIZE_EVERY_N_TURNS);
+        if (goalManager) await goalManager.save();
+        if (reflectionManager) await reflectionManager.save();
     }
 
     private delay(ms: number): Promise<void> {
@@ -435,7 +455,7 @@ export class TurnManager {
         memory: string,
         goals: string,
         reflection: string,
-        reflectionManager: ReflectionManager,
+        reflectionManager: ReflectionManager | undefined,
         log: ChronologicalLog,
     ): Promise<GuardedDecision> {
         const parsedRaw = parseDirectives(rawResponse);
@@ -453,7 +473,7 @@ export class TurnManager {
             }
 
             if (repaired.removedLines.length > 0) {
-                reflectionManager.recordOutputFormatFailure(
+                reflectionManager?.recordOutputFormatFailure(
                     this.turnNumber,
                     'output_format:non_command_lines',
                     `Removed ${repaired.removedLines.length} non-command lines before execution`,
@@ -466,7 +486,7 @@ export class TurnManager {
 
             const failureKey = validation.failureKey ?? 'output_format:invalid_response';
             const reason = validation.reason ?? 'Directive output failed validation.';
-            reflectionManager.recordOutputFormatFailure(this.turnNumber, failureKey, reason);
+            reflectionManager?.recordOutputFormatFailure(this.turnNumber, failureKey, reason);
 
             if (attempt >= OUTPUT_GUARD_REPROMPT_ATTEMPTS) {
                 log.recordAction(`My output format was invalid and execution was guarded: ${reason}`);

@@ -14,7 +14,7 @@ import { ChronologicalLog } from '../ChronologicalLog';
 import { buildRemovedFunctionNote, partitionPersistedFunctionRecords } from '../PersistedFunctionAudit';
 import { executeFunction, deleteFunctionRecord, loadFunctionRecords, searchWeb } from '../ToolService';
 import { FunctionRecord } from '../GameConfig';
-import { FONT, NPCS, PLAYER_SPAWN, BUILDINGS } from '../GameConfig';
+import { FONT, NPCS, PLAYER_SPAWN, BUILDINGS, isFeatureEnabled } from '../GameConfig';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -49,7 +49,7 @@ export class GameScene extends Scene {
         this.spawnNPCs();
         this.setupCamera();
         this.placeBuildingLabels();
-        void this.loadPersistedFunctions();
+        if (isFeatureEnabled('functionBuilding')) void this.loadPersistedFunctions();
 
         // Temporary: log world state so we can inspect the format
         console.log(buildWorldState(this.player, this.entityManager.getEntities(), this.toolRegistry));
@@ -212,7 +212,7 @@ export class GameScene extends Scene {
     private placeBuildingLabels(): void {
         this.clearBuildingVisuals();
 
-        for (const building of this.toolRegistry.getAll()) {
+        for (const building of this.toolRegistry.getVisible()) {
             const worldPos = this.map.tileToWorldXY(building.tile.x, building.tile.y)!;
             const depth = building.tile.x + building.tile.y + 1;
 
@@ -277,6 +277,7 @@ export class GameScene extends Scene {
     // ── Player conversation ──────────────────────────────────
 
     private tryStartPlayerConversation(): void {
+        if (!isFeatureEnabled('conversations')) return;
         if (this.dialogueBox.isOpen()) return;
         if (this.conversationManager.isInConversation()) return;
 
@@ -320,7 +321,7 @@ export class GameScene extends Scene {
     }
 
     private getBuildingSignature(): string {
-        return this.toolRegistry.getAll()
+        return this.toolRegistry.getVisible()
             .map(b => `${b.id}@${b.tile.x},${b.tile.y}`)
             .sort()
             .join('|');

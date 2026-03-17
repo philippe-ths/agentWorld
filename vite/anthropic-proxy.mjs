@@ -28,10 +28,37 @@ export function anthropicProxy() {
         'claude-opus-4-6',
     ];
 
+    const TRANSIENT_CODES = new Set([429, 500, 502, 503, 529]);
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 1000;
+
+    function isTransient(err) {
+        const status = Number(err?.status || 0);
+        return TRANSIENT_CODES.has(status);
+    }
+
     function shouldRetryWithFallback(err) {
         const status = Number(err?.status || 0);
         const message = String(err?.message || '');
         return status === 404 || message.includes('not_found_error') || message.includes('model:');
+    }
+
+    async function callWithRetry(client, params) {
+        let lastErr;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                return await client.messages.create(params);
+            } catch (err) {
+                lastErr = err;
+                if (!isTransient(err) || attempt === MAX_RETRIES) throw err;
+                const delay = BASE_DELAY_MS * 2 ** attempt;
+                console.warn(
+                    `[anthropic-proxy] Transient error (${err.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`,
+                );
+                await new Promise(r => globalThis.setTimeout(r, delay));
+            }
+        }
+        throw lastErr;
     }
 
     return {
@@ -77,13 +104,15 @@ export function anthropicProxy() {
                     let requestedModel = model || fallbackModels[0];
                     let response;
 
+                    const makeParams = (m) => ({
+                        model: m,
+                        max_tokens: Number(max_tokens) || 256,
+                        system,
+                        messages,
+                    });
+
                     try {
-                        response = await client.messages.create({
-                            model: requestedModel,
-                            max_tokens: Number(max_tokens) || 256,
-                            system,
-                            messages,
-                        });
+                        response = await callWithRetry(client, makeParams(requestedModel));
                     } catch (err) {
                         if (shouldRetryWithFallback(err)) {
                             let recovered = false;
@@ -95,12 +124,7 @@ export function anthropicProxy() {
                                         `[anthropic-proxy] Model \"${requestedModel}\" unavailable, retrying with \"${fallbackModel}\"`,
                                     );
                                     requestedModel = fallbackModel;
-                                    response = await client.messages.create({
-                                        model: requestedModel,
-                                        max_tokens: Number(max_tokens) || 256,
-                                        system,
-                                        messages,
-                                    });
+                                    response = await callWithRetry(client, makeParams(requestedModel));
                                     recovered = true;
                                     break;
                                 } catch (fallbackErr) {
@@ -126,9 +150,10 @@ export function anthropicProxy() {
                     res.setHeader('Content-Type', 'application/json');
                     res.end(JSON.stringify({ text }));
                 } catch (err) {
-                    console.error('[anthropic-proxy] API error:', err.message);
-                    res.statusCode = 502;
-                    res.end(JSON.stringify({ error: `Anthropic API error: ${err.message}` }));
+                    const status = Number(err?.status) || 502;
+                    console.error(`[anthropic-proxy] API error (${status}):`, err.message);
+                    res.statusCode = status;
+                    res.end(JSON.stringify({ error: `Anthropic API error: ${status} ${err.message}` }));
                 }
             });
         },

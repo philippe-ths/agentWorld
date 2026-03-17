@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChronologicalLog, parseStructuredSummaryText } from './ChronologicalLog';
+import { FEATURES } from './GameConfig';
 
 describe('parseStructuredSummaryText', () => {
     it('parses and normalizes a valid structured summary', () => {
@@ -30,9 +31,11 @@ describe('parseStructuredSummaryText', () => {
 describe('ChronologicalLog maybeSummarize', () => {
     afterEach(() => {
         vi.restoreAllMocks();
+        FEATURES.logSummarization = false;
     });
 
     it('falls back to raw text when structured parsing fails', async () => {
+        FEATURES.logSummarization = true;
         const capturedSaves: string[] = [];
         const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
             if (input.includes('/chat')) {

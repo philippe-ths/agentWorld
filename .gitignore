@@ -31,5 +31,9 @@ server/data/
 # NPC log files (generated at runtime)
 data/logs/chronological-*.md
 data/logs/goals-*.md
+data/logs/reflection-*.md
 
 data/functions/*.json
+
+# Evaluation results
+data/test-results/

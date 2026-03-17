@@ -1,4 +1,4 @@
-import { Entity } from './entities/Entity';
+import { TilePos } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA, getAdjacentBuildings } from './MapData';
 import { ToolRegistry } from './ToolRegistry';
 
@@ -7,7 +7,13 @@ const TILE_CHARS: Record<number, string> = {
     1: '~',  // water
 };
 
-export function buildWorldState(observer: Entity, allEntities: Entity[], toolRegistry?: ToolRegistry): string {
+/** Minimal entity shape needed for world-state rendering. */
+export interface WorldEntity {
+    name: string;
+    tilePos: TilePos;
+}
+
+export function buildWorldState(observer: WorldEntity, allEntities: WorldEntity[], toolRegistry?: ToolRegistry): string {
     const lines: string[] = [];
 
     lines.push(`MAP: ${MAP_WIDTH}x${MAP_HEIGHT}`);

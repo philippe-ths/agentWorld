@@ -61,15 +61,15 @@ export const DECISION: PromptConfig = {
             '  wait() — do nothing this action.',
         ];
         if (conversations) {
-            commands.push('  start_conversation_with(Name, message) — you must be adjacent to the entity. Ends your turn immediately.');
+            commands.push('  start_conversation_with(Name, message) — you must be adjacent to the entity. Must be your last action — any actions listed after it are skipped.');
         }
         if (isFeatureEnabled('searchTerminal') || isFeatureEnabled('functionBuilding')) {
-            commands.push('  use_tool(tool_id, "arguments") — you must be adjacent to the tool building. Ends your turn immediately.');
+            commands.push('  use_tool(tool_id, "arguments") — you must be adjacent to the tool building. Must be your last action — any actions listed after it are skipped.');
         }
         if (functionBuilding) {
-            commands.push('  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge. Ends your turn immediately.');
-            commands.push('  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge. Ends your turn immediately.');
-            commands.push('  delete_function("function_name") — you must be adjacent to Code Forge. Ends your turn immediately.');
+            commands.push('  create_function("description of what the function should do", x, y) — you must be adjacent to Code Forge. Must be your last action — any actions listed after it are skipped.');
+            commands.push('  update_function("function_name", "description of what to change") — you must be adjacent to Code Forge. Must be your last action — any actions listed after it are skipped.');
+            commands.push('  delete_function("function_name") — you must be adjacent to Code Forge. Must be your last action — any actions listed after it are skipped.');
         }
         if (goals) {
             commands.push('  sleep() — enter low-power mode for 10 turns. ONLY use when you have NO active goal and nothing useful to do. You CANNOT sleep if you have an active goal. Another entity can still wake you by starting a conversation.');
@@ -90,12 +90,13 @@ export const DECISION: PromptConfig = {
         rules.push('- To interact with an entity or tool, move to a tile next to them, not onto their tile.');
         rules.push('- Do not narrate. Do not explain your reasoning outside the required format.');
         rules.push('- Prefer concrete progress over hesitation.');
+        rules.push('- Chain move_to with an interaction in the same turn when possible — do not waste a turn only moving if you can also act on arrival.');
         rules.push('- Avoid repeating actions that recently failed unless the world state has changed.');
 
         // ── Examples ─────────────────────────────────────────
         const examples: string[] = [];
         if (conversations) {
-            examples.push(`Example valid response:
+            examples.push(`Example valid response (efficient — move + interact in one turn):
 REASONING: I should move next to Bjorn and tell him the search result.
 ACTIONS:
 move_to(12,8)

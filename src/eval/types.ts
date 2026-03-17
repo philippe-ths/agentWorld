@@ -1,4 +1,4 @@
-import { TilePos } from '../game/types';
+import type { TilePos } from '../game/types';
 import { FeatureKey } from '../game/GameConfig';
 
 // ── Outcomes ─────────────────────────────────────────────────

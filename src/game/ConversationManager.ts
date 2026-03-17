@@ -1,4 +1,5 @@
-import { Entity, TilePos } from './entities/Entity';
+import { Entity } from './entities/Entity';
+import type { TilePos } from './entities/Entity';
 import { NPC } from './entities/NPC';
 import { Player } from './entities/Player';
 import { EntityManager } from './entities/EntityManager';

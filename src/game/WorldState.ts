@@ -1,4 +1,4 @@
-import { TilePos } from './types';
+import type { TilePos } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, MAP_DATA, getAdjacentBuildings } from './MapData';
 import { ToolRegistry } from './ToolRegistry';
 

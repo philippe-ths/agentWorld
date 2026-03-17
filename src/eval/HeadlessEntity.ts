@@ -1,4 +1,4 @@
-import { TilePos } from '../game/types';
+import type { TilePos } from '../game/types';
 import { findPath } from '../game/Pathfinder';
 
 export interface WalkResult {

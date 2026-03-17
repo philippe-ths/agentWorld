@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { getScenario, getAllScenarioIds } from './scenarios/index';
 import { resetState } from './resetState';
-import { runScenario } from './HeadlessTurnLoop';
+import { runScenario, captureConfig } from './HeadlessTurnLoop';
 import { printScenarioResult, writeScenarioResult, printSuiteResult, writeSuiteResult } from './ResultWriter';
 import { ScenarioResult } from './types';
 
@@ -18,6 +18,8 @@ const args = process.argv.slice(2);
 
 const testScenarioIdx = args.indexOf('--test-scenario');
 const testingModeIdx = args.indexOf('--testing-mode');
+const titleIdx = args.indexOf('--title');
+const title = titleIdx !== -1 ? args[titleIdx + 1] ?? null : null;
 
 if (testScenarioIdx !== -1 && testingModeIdx !== -1) {
     console.error('Error: cannot use --test-scenario and --testing-mode together.');
@@ -31,27 +33,27 @@ if (testScenarioIdx !== -1) {
         console.error('Error: --test-scenario requires exactly one scenario id.');
         process.exit(1);
     }
-    void runSingle(scenarioId);
+    void runSingle(scenarioId, title);
 } else if (testingModeIdx !== -1) {
     // Suite mode
-    const scenarioIds = args.slice(testingModeIdx + 1).filter(a => !a.startsWith('--'));
+    const scenarioIds = args.slice(testingModeIdx + 1).filter((a: string) => !a.startsWith('--'));
     if (scenarioIds.length === 0) {
         console.error('Error: --testing-mode requires one or more scenario ids.');
         console.error(`Available scenarios: ${getAllScenarioIds().join(', ')}`);
         process.exit(1);
     }
-    void runSuite(scenarioIds);
+    void runSuite(scenarioIds, title);
 } else {
     console.error('Usage:');
-    console.error('  npm run dev -- --test-scenario <scenario-id>');
-    console.error('  npm run dev -- --testing-mode <scenario-id> [scenario-id ...]');
+    console.error('  npm run dev -- --test-scenario <scenario-id> [--title "label"]');
+    console.error('  npm run dev -- --testing-mode <scenario-id> [...] [--title "label"]');
     console.error(`\nAvailable scenarios: ${getAllScenarioIds().join(', ')}`);
     process.exit(1);
 }
 
 // ── Single scenario mode ─────────────────────────────────────
 
-async function runSingle(scenarioId: string): Promise<void> {
+async function runSingle(scenarioId: string, runTitle: string | null): Promise<void> {
     const scenario = getScenario(scenarioId);
     if (!scenario) {
         console.error(`Error: unknown scenario "${scenarioId}".`);
@@ -99,9 +101,12 @@ async function runSingle(scenarioId: string): Promise<void> {
                 npcTurnsTaken: 0,
                 failureReason: 'runtime error',
                 maxGlobalTurns: scenario.maxGlobalTurns,
+                config: captureConfig(),
                 timestamp: new Date().toISOString(),
             };
         }
+
+        if (runTitle) result.title = runTitle;
 
         // 4. Output
         console.log('');
@@ -116,7 +121,7 @@ async function runSingle(scenarioId: string): Promise<void> {
 
 // ── Suite mode (orchestrator) ────────────────────────────────
 
-async function runSuite(scenarioIds: string[]): Promise<void> {
+async function runSuite(scenarioIds: string[], runTitle: string | null): Promise<void> {
     // Validate all scenario IDs first
     for (const id of scenarioIds) {
         if (!getScenario(id)) {
@@ -131,7 +136,7 @@ async function runSuite(scenarioIds: string[]): Promise<void> {
     for (const id of scenarioIds) {
         console.log(`\n[eval suite] Running scenario: ${id}`);
 
-        const result = await spawnScenarioProcess(id);
+        const result = await spawnScenarioProcess(id, runTitle);
         results.push(result);
     }
 
@@ -143,12 +148,14 @@ async function runSuite(scenarioIds: string[]): Promise<void> {
     process.exit(hasFailures ? 1 : 0);
 }
 
-function spawnScenarioProcess(scenarioId: string): Promise<ScenarioResult> {
+function spawnScenarioProcess(scenarioId: string, runTitle: string | null): Promise<ScenarioResult> {
     return new Promise((promiseResolve) => {
         const projectRoot = resolve(__dirname, '..', '..');
+        const spawnArgs = ['tsx', 'src/eval/cli.ts', '--test-scenario', scenarioId];
+        if (runTitle) spawnArgs.push('--title', runTitle);
         const child = spawn(
             'npx',
-            ['tsx', 'src/eval/cli.ts', '--test-scenario', scenarioId],
+            spawnArgs,
             {
                 cwd: projectRoot,
                 stdio: 'inherit',
@@ -172,6 +179,7 @@ function spawnScenarioProcess(scenarioId: string): Promise<ScenarioResult> {
                     npcTurnsTaken: 0,
                     failureReason: 'runtime error',
                     maxGlobalTurns: getScenario(scenarioId)?.maxGlobalTurns ?? 0,
+                    config: captureConfig(),
                     timestamp: new Date().toISOString(),
                 });
             }

@@ -1,4 +1,5 @@
 import { TilePos } from '../game/types';
+import { FeatureKey } from '../game/GameConfig';
 
 // ── Outcomes ─────────────────────────────────────────────────
 
@@ -22,12 +23,39 @@ export interface TestScenario {
     id: string;
     targetNpc: 'Ada' | 'Bjorn' | 'Cora';
     maxGlobalTurns: number;
+    features?: Partial<Record<FeatureKey, boolean>>;
     seedChronologicalLog(): Promise<void>;
     checkSuccess(state: EvalGameState): boolean;
     checkAbort?(state: EvalGameState): AbortReason | null;
 }
 
 // ── Result shapes ────────────────────────────────────────────
+
+export interface GameConfigSnapshot {
+    models: {
+        opus: string;
+        sonnet: string;
+        haiku: string;
+    };
+    tuning: {
+        summarizeEveryNTurns: number;
+        reflectionEveryNTurns: number;
+        unknownDirectiveTriggerThreshold: number;
+        outputGuardRepromptAttempts: number;
+        logCharBudget: number;
+        maxExchanges: number;
+        npcCommandsPerTurn: number;
+        sleepTurns: number;
+    };
+    features: {
+        conversations: boolean;
+        goals: boolean;
+        reflection: boolean;
+        logSummarization: boolean;
+        functionBuilding: boolean;
+        searchTerminal: boolean;
+    };
+}
 
 export interface ScenarioResult {
     scenarioId: string;
@@ -37,7 +65,9 @@ export interface ScenarioResult {
     npcTurnsTaken: number;
     failureReason: string | null;
     maxGlobalTurns: number;
+    config: GameConfigSnapshot;
     timestamp: string;
+    title?: string;
 }
 
 export interface SuiteResult {
@@ -48,6 +78,8 @@ export interface SuiteResult {
         globalTurnsElapsed: number;
         npcTurnsTaken: number;
         failureReason: string | null;
+        config: GameConfigSnapshot;
+        title?: string;
     }>;
     summary: {
         successCount: number;

@@ -149,3 +149,15 @@ For NPC-to-NPC conversations, both NPCs get the transcript in their logs. For pl
 | `src/game/ReflectionManager.ts` | Per-NPC reflection persistence — refreshed after conversation goal changes |
 | `src/game/DirectiveParser.ts` | Parses `start_conversation_with` and `end_conversation` directives |
 | `src/game/TurnManager.ts` | Conversation pause/resume, player interrupt entry point |
+
+## Headless Conversations
+
+`HeadlessConversationManager` (in `src/eval/`) mirrors the NPC-to-NPC conversation flow for headless evaluation mode. It uses the same `LLMService.converse()` calls and `GoalExtractor` but has no Phaser, speech bubble, or UI dependencies.
+
+Key differences from the browser `ConversationManager`:
+- No speech bubbles or dialogue box — conversation messages are logged to the terminal
+- No Phaser scene or sprite dependencies
+- Sleep-waking is handled externally via an `onNpcEngaged` callback (wired by `HeadlessTurnLoop`)
+- Player conversations are not supported in headless mode
+
+See [evaluation.md](evaluation.md) for the full headless conversation flow and architecture.

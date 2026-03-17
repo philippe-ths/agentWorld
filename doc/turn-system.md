@@ -145,3 +145,16 @@ A fixed label in the top-left corner shows:
 | `src/game/ConversationManager.ts` | Multi-turn NPC-NPC and player-NPC conversations |
 | `src/game/entities/NPC.ts` | `walkToAsync()` with optimistic pathfinding |
 | `src/game/entities/Entity.ts` | `moveToAsync()`, sleep visuals |
+
+## Headless Turn Loop
+
+`HeadlessTurnLoop` (in `src/eval/`) replicates the browser `TurnManager` loop for headless evaluation. It uses the same `LLMService`, `DirectiveParser`, `ChronologicalLog`, `GoalManager`, and `ReflectionManager`, but substitutes headless versions of the entity system and directive executor.
+
+Key differences from the browser turn loop:
+- No Phaser — entities are plain objects with instant A* pathfinding (no tweens or animation delays)
+- Vite dev server starts on a random available port (not 8080) with `patchFetch()` for relative API URLs
+- An `AbortMonitor` tracks the target NPC for repeated failures or invalid output and can trigger early abort
+- Post-turn evaluation checks `checkSuccess()` → `checkAbort()` → max turns, producing a `ScenarioResult`
+- No 5-second inter-turn delay
+
+See [evaluation.md](evaluation.md) for CLI usage, scenario authoring, and the full headless architecture.

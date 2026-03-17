@@ -13,14 +13,16 @@ function ensureDir(): void {
 // ── Terminal output ──────────────────────────────────────────
 
 export function printScenarioResult(r: ScenarioResult): void {
+    const ts = r.timestamp.replace(/[:.]/g, '-').slice(0, 19);
     const lines = [
         `[TEST] ${r.scenarioId}`,
+        ...(r.title ? [`Title: ${r.title}`] : []),
         `Target NPC: ${r.targetNpc}`,
         `Result: ${r.result}`,
         `Global turns elapsed: ${r.globalTurnsElapsed}`,
         `${r.targetNpc} turns taken: ${r.npcTurnsTaken}`,
         `Failure reason: ${r.failureReason ?? 'none'}`,
-        `Result file: data/test-results/${r.scenarioId}.json`,
+        `Result file: data/test-results/${r.scenarioId}-${ts}.json`,
     ];
     console.log(lines.join('\n'));
 }
@@ -49,8 +51,16 @@ export function printSuiteResult(results: ScenarioResult[]): void {
 
 export function writeScenarioResult(r: ScenarioResult): void {
     ensureDir();
-    const path = resolve(RESULTS_DIR, `${r.scenarioId}.json`);
-    writeFileSync(path, JSON.stringify(r, null, 2) + '\n', 'utf-8');
+    const json = JSON.stringify(r, null, 2) + '\n';
+
+    // Stable file for suite orchestration (overwritten each run)
+    const stablePath = resolve(RESULTS_DIR, `${r.scenarioId}.json`);
+    writeFileSync(stablePath, json, 'utf-8');
+
+    // Timestamped file for run history (never overwritten)
+    const ts = r.timestamp.replace(/[:.]/g, '-').slice(0, 19);
+    const historyPath = resolve(RESULTS_DIR, `${r.scenarioId}-${ts}.json`);
+    writeFileSync(historyPath, json, 'utf-8');
 }
 
 export function writeSuiteResult(results: ScenarioResult[]): string {
@@ -66,6 +76,8 @@ export function writeSuiteResult(results: ScenarioResult[]): string {
             globalTurnsElapsed: r.globalTurnsElapsed,
             npcTurnsTaken: r.npcTurnsTaken,
             failureReason: r.failureReason,
+            config: r.config,
+            ...(r.title ? { title: r.title } : {}),
         })),
         summary: computeSummary(results),
     };

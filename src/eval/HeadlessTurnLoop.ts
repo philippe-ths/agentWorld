@@ -1,8 +1,9 @@
 import { HeadlessEntity, HeadlessNPC } from './HeadlessEntity';
 import { HeadlessEntityManager } from './HeadlessEntityManager';
 import { HeadlessDirectiveExecutor } from './HeadlessDirectiveExecutor';
+import { HeadlessConversationManager } from './HeadlessConversationManager';
 import { AbortMonitor } from './AbortMonitor';
-import { TestScenario, ScenarioResult, EvalGameState, TestOutcome } from './types';
+import { TestScenario, ScenarioResult, EvalGameState, TestOutcome, GameConfigSnapshot } from './types';
 import { ChronologicalLog } from '../game/ChronologicalLog';
 import { GoalManager } from '../game/GoalManager';
 import { ReflectionManager } from '../game/ReflectionManager';
@@ -12,10 +13,11 @@ import { ToolRegistry } from '../game/ToolRegistry';
 import { parseDirectives, Directive, repairDirectiveOutput, validateDirectiveOutput } from '../game/DirectiveParser';
 import {
     NPCS, PLAYER_SPAWN, BUILDINGS,
+    LLM_MODEL_OPUS, LLM_MODEL_SONNET, LLM_MODEL_HAIKU,
     SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS,
     UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD, OUTPUT_GUARD_REPROMPT_ATTEMPTS,
-    LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN, SLEEP_TURNS,
-    isFeatureEnabled,
+    LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN, SLEEP_TURNS, MAX_EXCHANGES,
+    FEATURES, isFeatureEnabled, FeatureKey,
 } from '../game/GameConfig';
 
 /**
@@ -23,6 +25,27 @@ import {
  * Replicates the TurnManager's NPC turn loop with monitoring for success/abort/fail.
  */
 export async function runScenario(scenario: TestScenario): Promise<ScenarioResult> {
+    // ── Feature flag overrides ───────────────────────────────
+
+    const savedFeatures = { ...FEATURES };
+    if (scenario.features) {
+        for (const [key, value] of Object.entries(scenario.features)) {
+            FEATURES[key as FeatureKey] = value;
+        }
+        console.log(`[eval] Feature overrides applied:`, scenario.features);
+    }
+
+    try {
+        return await runScenarioInner(scenario);
+    } finally {
+        // Restore original feature flags
+        for (const key of Object.keys(savedFeatures) as FeatureKey[]) {
+            FEATURES[key] = savedFeatures[key];
+        }
+    }
+}
+
+async function runScenarioInner(scenario: TestScenario): Promise<ScenarioResult> {
     // ── Setup ────────────────────────────────────────────────
 
     const toolRegistry = createToolRegistry();
@@ -46,7 +69,6 @@ export async function runScenario(scenario: TestScenario): Promise<ScenarioResul
         npcs.push(npc);
     }
 
-    const executor = new HeadlessDirectiveExecutor(toolRegistry, entityManager);
     const llm = new LLMService();
     const abortMonitor = new AbortMonitor();
 
@@ -73,6 +95,22 @@ export async function runScenario(scenario: TestScenario): Promise<ScenarioResul
             reflections.set(npc.name, reflMgr);
         }
     }
+
+    // Create conversation manager and wire into executor
+    const conversationManager = new HeadlessConversationManager(
+        entityManager, llm, logs, goals, reflections, toolRegistry,
+    );
+    conversationManager.onNpcEngaged = (npcName) => {
+        sleepUntil.delete(npcName);
+        const npc = npcs.find(n => n.name === npcName);
+        if (npc) {
+            npc.sleeping = false;
+            const npcLog = logs.get(npcName);
+            npcLog?.recordAction(`I was woken up by a conversation`);
+        }
+    };
+
+    const executor = new HeadlessDirectiveExecutor(toolRegistry, entityManager, conversationManager);
 
     // Resume turn counter from persisted logs
     let turnNumber = 0;
@@ -405,6 +443,27 @@ function createToolRegistry(): ToolRegistry {
 
 // ── Helper ───────────────────────────────────────────────────
 
+export function captureConfig(): GameConfigSnapshot {
+    return {
+        models: {
+            opus: LLM_MODEL_OPUS,
+            sonnet: LLM_MODEL_SONNET,
+            haiku: LLM_MODEL_HAIKU,
+        },
+        tuning: {
+            summarizeEveryNTurns: SUMMARIZE_EVERY_N_TURNS,
+            reflectionEveryNTurns: REFLECTION_EVERY_N_TURNS,
+            unknownDirectiveTriggerThreshold: UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD,
+            outputGuardRepromptAttempts: OUTPUT_GUARD_REPROMPT_ATTEMPTS,
+            logCharBudget: LOG_CHAR_BUDGET,
+            maxExchanges: MAX_EXCHANGES,
+            npcCommandsPerTurn: NPC_COMMANDS_PER_TURN,
+            sleepTurns: SLEEP_TURNS,
+        },
+        features: { ...FEATURES },
+    };
+}
+
 function buildResult(
     scenario: TestScenario,
     result: TestOutcome,
@@ -420,6 +479,7 @@ function buildResult(
         npcTurnsTaken,
         failureReason,
         maxGlobalTurns: scenario.maxGlobalTurns,
+        config: captureConfig(),
         timestamp: new Date().toISOString(),
     };
 }

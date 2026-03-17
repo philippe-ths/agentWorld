@@ -48,6 +48,22 @@ src/
     ui/
       DialogueBox.ts       UI overlay for player-NPC conversation input
       SpeechBubble.ts      Floating speech bubble above speaking entities
+  eval/
+    dev-entry.ts           Unified npm run dev entry — routes to eval CLI or Vite server
+    cli.ts                 Argument parsing, Vite startup, single/suite orchestration
+    HeadlessTurnLoop.ts    Core headless turn loop — runScenario(), per-NPC turns, output guard
+    HeadlessConversationManager.ts  NPC-to-NPC conversation loop without Phaser
+    HeadlessDirectiveExecutor.ts    Executes directives in headless eval mode
+    HeadlessEntity.ts      HeadlessEntity + HeadlessNPC (instant A* pathfinding)
+    HeadlessEntityManager.ts  Entity storage + walkability from MAP_DATA
+    AbortMonitor.ts        Tracks repeated failures / invalid output for early abort
+    ResultWriter.ts        Prints terminal output + writes JSON result files
+    resetState.ts          Clears all persisted NPC state before a run
+    types.ts               TestScenario, ScenarioResult, SuiteResult, GameConfigSnapshot
+    scenarios/
+      index.ts             Scenario registry (getScenario, getAllScenarioIds)
+      scenario-one.ts      Navigation test — Ada walks to target tile
+      scenario-gather.ts   Cooperation test — Ada gathers Bjorn + Cora at meeting point
 vite/
   config.dev.mjs           Dev config — includes all server plugins
   config.prod.mjs          Production build config (static only, no API plugins)
@@ -64,6 +80,9 @@ data/
     reflection-{Name}.md
   functions/               NPC-created function records (JSON, generated at runtime)
     {function_name}.json
+  test-results/            Evaluation result JSON files (generated at runtime)
+    {scenario-id}.json
+    {scenario-id}-{timestamp}.json
 ```
 
 ## Scene Flow
@@ -112,6 +131,12 @@ Generated once at import time by `MapData.ts`. Uses a seeded PRNG (mulberry32, s
 The player is **not** part of the turn system and can move at any time.
 
 Press **P** to pause/resume the NPC turn loop.
+
+## Evaluation System
+
+The `src/eval/` tree provides a headless evaluation mode that replicates the browser turn loop in pure Node.js — no Phaser, no browser. Scenarios are run from the command line via `npm run dev -- --test-scenario <id>`. The headless loop uses the same `LLMService`, `ChronologicalLog`, `GoalManager`, and `ReflectionManager` as the browser game, but substitutes `HeadlessEntity`/`HeadlessNPC` (instant pathfinding), `HeadlessDirectiveExecutor`, and `HeadlessConversationManager` for their Phaser-dependent counterparts.
+
+See [evaluation.md](evaluation.md) for CLI usage, scenario authoring, result format, and the full headless architecture.
 
 ## Feature Toggles
 

@@ -1,8 +1,9 @@
 import { Scene } from 'phaser';
 import { TILE_W, TILE_H, MOVE_TWEEN_DURATION, FONT } from '../GameConfig';
-import { TilePos } from '../types';
+import type { TilePos } from '../types';
 
-export { TILE_W, TILE_H, TilePos };
+export { TILE_W, TILE_H };
+export type { TilePos };
 
 export abstract class Entity {
     sprite!: Phaser.GameObjects.Sprite;

@@ -1,5 +1,5 @@
 import { DECISION, CONVERSATION } from './prompts';
-import { LLM_ENDPOINTS } from './GameConfig';
+import { DEBUG, LLM_ENDPOINTS } from './GameConfig';
 
 export interface ConversationMessage {
     speaker: string;
@@ -29,14 +29,16 @@ export class LLMService {
         outputGuardFeedback?: string,
     ): Promise<string> {
         // ── Log prompt ──────────────────────────────────────
-        console.group(`%c[LLM] ${npcName}'s prompt`, 'color: #6bc5ff; font-weight: bold');
-        console.log('%cSystem:', 'color: #aaa', DECISION.buildSystem());
-        if (memory) console.log('%cMemory:', 'color: #c9a0ff', memory);
-        if (goals) console.log('%cGoals:', 'color: #ffcc00', goals);
-        if (reflection) console.log('%cReflection:', 'color: #8ee28e', reflection);
-        if (outputGuardFeedback) console.log('%cOutput guard feedback:', 'color: #ffaa00', outputGuardFeedback);
-        console.log('%cWorld state:', 'color: #aaa', worldState);
-        console.groupEnd();
+        if (DEBUG) {
+            console.group(`%c[LLM] ${npcName}'s prompt`, 'color: #6bc5ff; font-weight: bold');
+            console.log('%cSystem:', 'color: #aaa', DECISION.buildSystem());
+            if (memory) console.log('%cMemory:', 'color: #c9a0ff', memory);
+            if (goals) console.log('%cGoals:', 'color: #ffcc00', goals);
+            if (reflection) console.log('%cReflection:', 'color: #8ee28e', reflection);
+            if (outputGuardFeedback) console.log('%cOutput guard feedback:', 'color: #ffaa00', outputGuardFeedback);
+            console.log('%cWorld state:', 'color: #aaa', worldState);
+            console.groupEnd();
+        }
 
         const messages: { role: string; content: string }[] = [];
         if (memory) {
@@ -90,9 +92,11 @@ export class LLMService {
         const text: string = data.text;
 
         // ── Log response ────────────────────────────────────
-        console.group(`%c[LLM] ${npcName}'s response`, 'color: #b06bff; font-weight: bold');
-        console.log(text);
-        console.groupEnd();
+        if (DEBUG) {
+            console.group(`%c[LLM] ${npcName}'s response`, 'color: #b06bff; font-weight: bold');
+            console.log(text);
+            console.groupEnd();
+        }
 
         return text;
     }
@@ -128,9 +132,11 @@ export class LLMService {
             max_tokens: CONVERSATION.maxTokens,
         };
 
-        console.group(`%c[LLM] ${npcName}'s conversation response`, 'color: #ff9f43; font-weight: bold');
-        console.log('%cHistory:', 'color: #aaa', historyText);
-        console.groupEnd();
+        if (DEBUG) {
+            console.group(`%c[LLM] ${npcName}'s conversation response`, 'color: #ff9f43; font-weight: bold');
+            console.log('%cHistory:', 'color: #aaa', historyText);
+            console.groupEnd();
+        }
 
         let response: Response;
         try {
@@ -157,9 +163,11 @@ export class LLMService {
         const data = await response.json();
         const text: string = data.text.trim();
 
-        console.group(`%c[LLM] ${npcName}'s conversation response`, 'color: #ff9f43; font-weight: bold');
-        console.log(text);
-        console.groupEnd();
+        if (DEBUG) {
+            console.group(`%c[LLM] ${npcName}'s conversation response`, 'color: #ff9f43; font-weight: bold');
+            console.log(text);
+            console.groupEnd();
+        }
 
         return this.parseConversationResponse(text);
     }

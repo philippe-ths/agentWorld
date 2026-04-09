@@ -1,5 +1,17 @@
 import type { TilePos } from './types';
 
+// ── Debug ────────────────────────────────────────────────────
+// Toggle via browser console: DEBUG = true
+export let DEBUG = false;
+
+// Expose on window for runtime toggling from browser dev console
+if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'DEBUG', {
+        get: () => DEBUG,
+        set: (v: boolean) => { DEBUG = v; },
+    });
+}
+
 // ── Map ──────────────────────────────────────────────────────
 
 export const MAP_SEED = 42;

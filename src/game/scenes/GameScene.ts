@@ -14,7 +14,7 @@ import { ChronologicalLog } from '../ChronologicalLog';
 import { buildRemovedFunctionNote, partitionPersistedFunctionRecords } from '../PersistedFunctionAudit';
 import { executeFunction, deleteFunctionRecord, loadFunctionRecords, searchWeb } from '../ToolService';
 import { FunctionRecord } from '../GameConfig';
-import { FONT, NPCS, PLAYER_SPAWN, BUILDINGS, isFeatureEnabled } from '../GameConfig';
+import { DEBUG, FONT, NPCS, PLAYER_SPAWN, BUILDINGS, isFeatureEnabled } from '../GameConfig';
 
 const TILE_KEYS = ['tile-grass', 'tile-water'];
 
@@ -51,8 +51,7 @@ export class GameScene extends Scene {
         this.placeBuildingLabels();
         if (isFeatureEnabled('functionBuilding')) void this.loadPersistedFunctions();
 
-        // Temporary: log world state so we can inspect the format
-        console.log(buildWorldState(this.player, this.entityManager.getEntities(), this.toolRegistry));
+        if (DEBUG) console.log(buildWorldState(this.player, this.entityManager.getEntities(), this.toolRegistry));
 
         this.turnManager = new TurnManager(this, this.npcs, this.entityManager, this.toolRegistry);
 

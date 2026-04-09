@@ -1,9 +1,12 @@
 {
     "name": "agent-world",
-    "description": "A Phaser 3 isometric game with a player and NPCs.",
+    "description": "Isometric Phaser 3 game where three NPCs make autonomous decisions via Claude",
     "version": "1.0.0",
     "private": true,
     "license": "MIT",
+    "engines": {
+        "node": ">=18"
+    },
     "scripts": {
         "dev": "tsx src/eval/dev-entry.ts",
         "build": "vite build --config vite/config.prod.mjs",

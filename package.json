@@ -1,6 +1,6 @@
 {
     "name": "agent-world",
-    "description": "A Phaser 3 isometric game with a player and NPCs.",
+    "description": "Isometric Phaser 3 game where three NPCs make autonomous decisions via Claude",
     "version": "1.0.0",
     "private": true,
     "license": "MIT",

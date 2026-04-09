@@ -1,7 +1,7 @@
 import { ConversationMessage } from './LLMService';
 import { Goal, GoalManager } from './GoalManager';
 import { GOAL_EXTRACTION } from './prompts';
-import { LLM_ENDPOINTS } from './GameConfig';
+import { DEBUG, LLM_ENDPOINTS } from './GameConfig';
 
 function formatTranscript(history: ConversationMessage[]): string {
     return history.map(m => `${m.speaker}: ${m.text}`).join('\n');
@@ -94,9 +94,11 @@ export async function extractGoal(
     const data = await response.json();
     const text: string = String(data.text ?? '').trim();
 
-    console.group(`%c[GoalExtractor] ${npcName}`, 'color: #ff9f43; font-weight: bold');
-    console.log(text);
-    console.groupEnd();
+    if (DEBUG) {
+        console.group(`%c[GoalExtractor] ${npcName}`, 'color: #ff9f43; font-weight: bold');
+        console.log(text);
+        console.groupEnd();
+    }
 
     const normalized = text.replace(/\r\n?/g, '\n').trim();
     if (COMPLETE_RE.test(normalized)) {

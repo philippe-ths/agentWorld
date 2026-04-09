@@ -13,7 +13,7 @@ import { DirectiveExecutor } from './DirectiveExecutor';
 import { FunctionBuilderService } from './FunctionBuilderService';
 import { ReflectionManager } from './ReflectionManager';
 import {
-    SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS, UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD,
+    DEBUG, SUMMARIZE_EVERY_N_TURNS, REFLECTION_EVERY_N_TURNS, UNKNOWN_DIRECTIVE_TRIGGER_THRESHOLD,
     OUTPUT_GUARD_REPROMPT_ATTEMPTS, LOG_CHAR_BUDGET, NPC_COMMANDS_PER_TURN,
     NPC_TURN_DELAY, FONT, SLEEP_TURNS, isFeatureEnabled,
 } from './GameConfig';
@@ -107,7 +107,7 @@ export class TurnManager {
         if (this.sleepUntil.delete(name)) {
             const npc = this.npcs.find(n => n.name === name);
             npc?.setSleeping(false);
-            console.log(`%c[TurnManager] ${name} woke up (conversation)`, 'color: #6bff6b; font-weight: bold');
+            if (DEBUG) console.log(`%c[TurnManager] ${name} woke up (conversation)`, 'color: #6bff6b; font-weight: bold');
         }
     }
 
@@ -150,7 +150,7 @@ export class TurnManager {
         if (wakeAt !== undefined && this.turnNumber < wakeAt) {
             const remaining = wakeAt - this.turnNumber;
             this.turnLabel.setText(`Turn ${this.turnNumber} — ${npc.name} sleeping (${remaining} turns left)`);
-            console.log(`%c[${npc.name}] sleeping (${remaining} turns left)`, 'color: #aaa');
+            if (DEBUG) console.log(`%c[${npc.name}] sleeping (${remaining} turns left)`, 'color: #aaa');
             return;
         }
         if (wakeAt !== undefined) {
@@ -159,7 +159,7 @@ export class TurnManager {
             npc.setSleeping(false);
             const log = this.logs.get(npc.name)!;
             log.recordAction(`I woke up (turn ${this.turnNumber})`);
-            console.log(`%c[${npc.name}] woke up (sleep expired)`, 'color: #6bff6b; font-weight: bold');
+            if (DEBUG) console.log(`%c[${npc.name}] woke up (sleep expired)`, 'color: #6bff6b; font-weight: bold');
         }
 
         const log = this.logs.get(npc.name)!;
@@ -338,7 +338,7 @@ export class TurnManager {
         // Check if NPC chose to sleep (blocked if they have an active goal)
         if (actionDirectives.some(d => d.type === 'sleep')) {
             if (goalManager?.getActiveGoal()) {
-                console.log(`%c[${npc.name}] sleep() rejected — has active goal`, 'color: #ffaa00; font-weight: bold');
+                if (DEBUG) console.log(`%c[${npc.name}] sleep() rejected — has active goal`, 'color: #ffaa00; font-weight: bold');
                 log.recordAction('→ sleep rejected: has active goal');
                 reflectionManager?.recordEvent({
                     turnNumber: this.turnNumber,
@@ -350,7 +350,7 @@ export class TurnManager {
                 this.sleepUntil.set(npc.name, this.turnNumber + SLEEP_TURNS);
                 npc.setSleeping(true);
                 log.recordAction(`Entered sleep mode (will wake at turn ${this.turnNumber + SLEEP_TURNS})`);
-                console.log(`%c[${npc.name}] sleep() — waking at turn ${this.turnNumber + SLEEP_TURNS}`, 'color: #aaa; font-weight: bold');
+                if (DEBUG) console.log(`%c[${npc.name}] sleep() — waking at turn ${this.turnNumber + SLEEP_TURNS}`, 'color: #aaa; font-weight: bold');
             }
         }
 
@@ -369,9 +369,9 @@ export class TurnManager {
         this.paused = !this.paused;
         if (this.paused) {
             this.turnLabel.setText('⏸ PAUSED (press P to resume)');
-            console.log('%c[TurnManager] Paused', 'color: #ffaa00; font-weight: bold');
+            if (DEBUG) console.log('%c[TurnManager] Paused', 'color: #ffaa00; font-weight: bold');
         } else {
-            console.log('%c[TurnManager] Resumed', 'color: #6bff6b; font-weight: bold');
+            if (DEBUG) console.log('%c[TurnManager] Resumed', 'color: #6bff6b; font-weight: bold');
             if (this.pauseResolve) {
                 this.pauseResolve();
                 this.pauseResolve = null;

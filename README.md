@@ -2,6 +2,8 @@
 
 An isometric game where autonomous NPCs explore, make decisions, and hold conversations — all powered by an LLM. The player moves freely on a procedurally generated tile map while NPCs take turns reasoning about the world through Claude.
 
+Built to explore emergent behaviour when LLM-driven agents share a persistent world with memory, goals, and the ability to create their own tools.
+
 ## Features
 
 - **LLM-driven NPCs** — Each NPC sends a compact world state and memory to Claude, receives back commands, and executes them autonomously

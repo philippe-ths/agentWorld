@@ -37,3 +37,10 @@ data/functions/*.json
 
 # Evaluation results
 data/test-results/
+
+.ai-policy/
+.claude/
+.githooks/
+CLAUDE.md
+ai-workflow.md
+project-spec.md

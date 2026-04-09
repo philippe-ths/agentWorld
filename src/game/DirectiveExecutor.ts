@@ -6,7 +6,7 @@ import { ToolRegistry } from './ToolRegistry';
 import { Directive } from './DirectiveParser';
 import { isAdjacentToBuilding } from './MapData';
 import { ReflectionEvent } from './ReflectionManager';
-import { isFeatureEnabled } from './GameConfig';
+import { DEBUG, isFeatureEnabled } from './GameConfig';
 
 export type GoalExecutionResult =
     | { type: 'completed_goal'; goal: string }
@@ -39,7 +39,7 @@ export class DirectiveExecutor {
             case 'complete_goal': {
                 const result = goalManager.completeGoal();
                 if (result) {
-                    console.log(`%c[${npc.name}] complete_goal()`, 'color: #6bff6b');
+                    if (DEBUG) console.log(`%c[${npc.name}] complete_goal()`, 'color: #6bff6b');
                     log.recordAction(`Completed goal: ${result.completed}`);
                     if (result.promoted) {
                         log.recordAction(`New goal: ${result.promoted.goal} (source: ${result.promoted.source})`);
@@ -51,7 +51,7 @@ export class DirectiveExecutor {
             case 'abandon_goal': {
                 const result = goalManager.abandonGoal();
                 if (result) {
-                    console.log(`%c[${npc.name}] abandon_goal()`, 'color: #ffaa00');
+                    if (DEBUG) console.log(`%c[${npc.name}] abandon_goal()`, 'color: #ffaa00');
                     log.recordAction(`Abandoned goal: ${result.abandoned}`);
                     if (result.promoted) {
                         log.recordAction(`New goal: ${result.promoted.goal} (source: ${result.promoted.source})`);
@@ -63,7 +63,7 @@ export class DirectiveExecutor {
             case 'switch_goal': {
                 const result = goalManager.switchGoal();
                 if (result) {
-                    console.log(`%c[${npc.name}] switch_goal()`, 'color: #ff9f43');
+                    if (DEBUG) console.log(`%c[${npc.name}] switch_goal()`, 'color: #ff9f43');
                     log.recordAction(`Abandoned goal: ${result.abandoned}`);
                     log.recordAction(`New goal: ${result.newGoal.goal} (source: ${result.newGoal.source})`);
                     return { type: 'switched_goal', oldGoal: result.abandoned, newGoal: result.newGoal.goal };
@@ -81,7 +81,7 @@ export class DirectiveExecutor {
     ): Promise<ActionExecutionResult> {
         switch (dir.type) {
             case 'move_to': {
-                console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
+                if (DEBUG) console.log(`%c[${npc.name}] move_to(${dir.x}, ${dir.y})`, 'color: #6bff6b');
                 const result: WalkResult = await npc.walkToAsync({ x: dir.x, y: dir.y });
                 if (result.reached) {
                     log.recordAction(`→ reached (${npc.tilePos.x},${npc.tilePos.y})`);
@@ -119,7 +119,7 @@ export class DirectiveExecutor {
                 }
             }
             case 'wait':
-                console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
+                if (DEBUG) console.log(`%c[${npc.name}] wait()`, 'color: #aaa');
                 await delay(300);
                 log.recordAction('→ waited');
                 return { shouldStop: false };
@@ -128,7 +128,7 @@ export class DirectiveExecutor {
                     log.recordAction(`→ start_conversation_with rejected: conversations are disabled`);
                     return { shouldStop: false };
                 }
-                console.log(`%c[${npc.name}] start_conversation_with(${dir.targetName}, ${dir.message})`, 'color: #ff9f43');
+                if (DEBUG) console.log(`%c[${npc.name}] start_conversation_with(${dir.targetName}, ${dir.message})`, 'color: #ff9f43');
                 const convoResult = await this.conversationManager.startNpcConversation(
                     npc, dir.targetName, dir.message, turnNumber,
                 );
@@ -171,7 +171,7 @@ export class DirectiveExecutor {
                     };
                 }
                 if (!isAdjacentToBuilding(npc.tilePos, building)) {
-                    console.log(`%c[${npc.name}] use_tool(${dir.toolId}) — not adjacent`, 'color: #ffaa00');
+                    if (DEBUG) console.log(`%c[${npc.name}] use_tool(${dir.toolId}) — not adjacent`, 'color: #ffaa00');
                     log.recordAction(`→ failed: not adjacent to ${building.displayName} at (${building.tile.x},${building.tile.y})`);
                     return {
                         shouldStop: false,
@@ -183,7 +183,7 @@ export class DirectiveExecutor {
                         },
                     };
                 }
-                console.log(`%c[${npc.name}] use_tool(${dir.toolId}, "${dir.args}")`, 'color: #6bff6b');
+                if (DEBUG) console.log(`%c[${npc.name}] use_tool(${dir.toolId}, "${dir.args}")`, 'color: #6bff6b');
                 try {
                     const result = await building.execute(dir.args);
                     log.recordAction(`→ result: ${result}`);
